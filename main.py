@@ -39,6 +39,7 @@ from stt import stt_instance, broadcast_stt_state, connected_websockets
 from tools import get_tools, get_available_functions, get_function_and_args
 from models.openaisdk import validate_messages_for_ws, stream_openai_completion
 from tts.processor import process_streams, audio_player
+from endpoints.api import router as api_router
 
 load_dotenv()
 
@@ -74,79 +75,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-router = APIRouter()
-
-@app.options("/api/options")
-async def openai_options():
-    return Response(status_code=200)
-
-# ---- Wakeword start stt Endpoint ----
-@app.post("/api/start-stt")
-async def start_stt_endpoint():
-    """
-    If STT is currently paused, this starts listening again.
-    Otherwise it does nothing.
-    """
-    if not stt_instance.is_listening:
-        stt_instance.start_listening()
-        await broadcast_stt_state()
-    return {"detail": "STT is now ON."}
-
-# ---- Pause stt Endpoint ----
-@app.post("/api/pause-stt")
-async def pause_stt_endpoint():
-    """
-    If STT is currently listening, this pauses it.
-    Otherwise it does nothing.
-    """
-    if stt_instance.is_listening:
-        stt_instance.pause_listening()
-        await broadcast_stt_state()
-    return {"detail": "STT is now OFF."}
-
-# ---- Audio Playback Toggle Endpoint ----
-@app.post("/api/toggle-audio")
-async def toggle_audio_playback():
-    try:
-        if audio_player.is_playing:
-            audio_player.stop_stream()
-            return {"audio_playing": False}
-        else:
-            audio_player.start_stream()
-            return {"audio_playing": True}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to toggle audio playback: {str(e)}")
-
-# ---- TTS Toggle Endpoint ----
-@app.post("/api/toggle-tts")
-async def toggle_tts():
-    try:
-        current_status = CONFIG["GENERAL_TTS"]["TTS_ENABLED"]
-        CONFIG["GENERAL_TTS"]["TTS_ENABLED"] = not current_status
-        await broadcast_stt_state()  # Optional: If TTS state affects is_listening
-        return {"tts_enabled": CONFIG["GENERAL_TTS"]["TTS_ENABLED"]}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to toggle TTS: {str(e)}")
-
-# ---- Stop TTS Endpoint ----
-@app.post("/api/stop-tts")
-async def stop_tts():
-    """
-    Manually set the global TTS_STOP_EVENT.
-    Any ongoing TTS/audio streaming will stop soon after it checks the event.
-    """
-    TTS_STOP_EVENT.set()
-    return {"detail": "TTS stop event triggered. Ongoing TTS tasks should exit soon."}
-
-# ---- Stop Text Generation Endpoint ----
-@app.post("/api/stop-generation")
-async def stop_generation():
-    """
-    Manually set the global GEN_STOP_EVENT.
-    Any ongoing streaming text generation will stop soon after it checks the event.
-    """
-    GEN_STOP_EVENT.set()
-    return {"detail": "Generation stop event triggered. Ongoing text generation will exit soon."}
 
 # ---- Unified WebSocket Endpoint ----
 async def stream_stt_to_client(websocket: WebSocket):
@@ -243,7 +171,7 @@ def shutdown_event():
     shutdown()
 
 # =========== Include Routers & Run ===========
-app.include_router(router)
+app.include_router(api_router)
 
 # ============== BACKGROUND WAKE WORD THREAD ==============
 
