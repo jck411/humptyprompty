@@ -16,7 +16,7 @@ CONFIG: Dict[str, Any] = {
     },
 
     "GENERAL_TTS": {
-        "TTS_PROVIDER": "openai",
+        "TTS_PROVIDER": "azure",
         "TTS_ENABLED": True
     },
 
