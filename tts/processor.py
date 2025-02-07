@@ -70,14 +70,18 @@ async def process_streams(phrase_queue: asyncio.Queue, audio_queue: asyncio.Queu
         conditional_print("STT paused before starting TTS.", "segment")
 
         tts_task = asyncio.create_task(tts_processor(phrase_queue, audio_queue, stop_event))
-        audio_player_task = asyncio.create_task(start_audio_player_async(audio_queue, loop, stop_event))
-        conditional_print("Started TTS and audio playback tasks.", "default")
-
-        await asyncio.gather(tts_task, audio_player_task)
+        
+        # Only start local audio playback if frontend playback is disabled
+        if not CONFIG["AUDIO_PLAYBACK_CONFIG"]["FRONTEND_PLAYBACK"]:
+            audio_player_task = asyncio.create_task(
+                start_audio_player_async(audio_queue, loop, stop_event)
+            )
+            await asyncio.gather(tts_task, audio_player_task)
+        else:
+            await tts_task
 
         stt_instance.start_listening()
         conditional_print("STT resumed after completing TTS.", "segment")
-        # Broadcast the resumed state
         await broadcast_stt_state()
 
     except Exception as e:

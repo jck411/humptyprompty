@@ -65,7 +65,8 @@ CONFIG: Dict[str, Any] = {
     "AUDIO_PLAYBACK_CONFIG": {
         "FORMAT": 16,
         "CHANNELS": 1,
-        "RATE": None
+        "RATE": 24000,
+        "FRONTEND_PLAYBACK": True  # Add this flag to control frontend playback
     },
     "LOGGING": {
         "PRINT_ENABLED": True,

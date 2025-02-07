@@ -126,6 +126,11 @@ async def unified_chat_websocket(websocket: WebSocket):
                     phrase_queue, audio_queue, TTS_STOP_EVENT
                 ))
 
+                # Start audio forwarding task
+                audio_forward_task = asyncio.create_task(forward_audio_to_websocket(
+                    audio_queue, websocket, TTS_STOP_EVENT
+                ))
+
                 # Stream the chat completion
                 try:
                     async for content in stream_openai_completion(
@@ -143,6 +148,7 @@ async def unified_chat_websocket(websocket: WebSocket):
                     # Signal end of TTS text
                     await phrase_queue.put(None)
                     await process_streams_task
+                    await audio_forward_task
 
                     # Resume STT after TTS
                     stt_instance.start_listening()
@@ -160,6 +166,28 @@ async def unified_chat_websocket(websocket: WebSocket):
         await broadcast_stt_state()
         await websocket.send_json({"is_listening": False})
         await websocket.close()
+
+# Add this new function to forward audio data
+async def forward_audio_to_websocket(audio_queue: asyncio.Queue, 
+                                   websocket: WebSocket,
+                                   stop_event: asyncio.Event):
+    """Forward audio data from the queue to the WebSocket client."""
+    try:
+        while not stop_event.is_set():
+            try:
+                audio_data = await audio_queue.get()
+                if audio_data is None:
+                    break
+                
+                # Prefix audio data with 'audio:' marker
+                message = b'audio:' + audio_data
+                await websocket.send_bytes(message)
+                
+            except Exception as e:
+                log_error("Error forwarding audio", e)
+                break
+    except Exception as e:
+        log_error("Audio forwarding task error", e)
 
 # =========== Use FastAPI's built-in shutdown event ===========
 @app.on_event("shutdown")
