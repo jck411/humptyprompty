@@ -73,9 +73,28 @@ CONFIG: Dict[str, Any] = {
     },
     "LOGGING": {
         "PRINT_SEGMENTS": True,
-        "PRINT_TOOL_CALLS": True,
+        "PRINT_TOOL_CALLS": False,
          "PRINT_FUNCTION_CALLS": True
 
+    },
+    "STT_SETTINGS": {
+        "LOCATION": "backend",  # Use "backend" for Azure STT or "frontend" for browser-based STT
+        "BACKEND_STT": {
+            "PROVIDER": "azure",
+            "LANGUAGE": "en-US",
+            "CONTINUOUS_RECOGNITION": True,
+            "PROFANITY_OPTION": "raw",
+            "AUTO_PUNCTUATION": True,
+            "INTERIM_RESULTS": False
+        },
+        "FRONTEND_STT": {
+            "PROVIDER": "browser",
+            "LANGUAGE": "en-US",
+            "CONTINUOUS_RECOGNITION": True,
+            "INTERIM_RESULTS": True,
+            "MAX_ALTERNATIVES": 1,
+            "AUTO_START": False
+        }
     }
 }
 

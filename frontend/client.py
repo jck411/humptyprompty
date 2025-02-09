@@ -4,6 +4,7 @@ import json
 import asyncio
 import requests
 import websockets
+import logging
 
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
@@ -17,6 +18,15 @@ from PyQt6.QtMultimedia import (
     QMediaDevices,
     QAudio,
 )
+
+# ===================== Logging Configuration =====================
+LOG_LEVEL = logging.WARNING  # Change this to adjust the logging level: DEBUG, INFO, WARNING, ERROR, CRITICAL.
+logging.basicConfig(
+    level=LOG_LEVEL,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S"
+)
+logger = logging.getLogger(__name__)
 
 # ===================== Server Configuration =====================
 # Replace with your server machine's IP address, port, and WebSocket path.
@@ -45,28 +55,28 @@ class QueueAudioDevice(QIODevice):
         super().__init__()
         self.audio_buffer = bytearray()
         self.mutex = QMutex()
-        print("QueueAudioDevice initialized")
+        logger.debug("QueueAudioDevice initialized")
 
     def readData(self, maxSize: int) -> bytes:
         with QMutexLocker(self.mutex):
             if len(self.audio_buffer) == 0:
-                print("Audio buffer empty, returning silence")
+                logger.debug("Audio buffer empty, returning silence")
                 return bytes(maxSize)
             data = bytes(self.audio_buffer[:maxSize])
             self.audio_buffer = self.audio_buffer[maxSize:]
-            print(f"Reading {len(data)} bytes from buffer, {len(self.audio_buffer)} remaining")
+            logger.debug(f"Reading {len(data)} bytes from buffer, {len(self.audio_buffer)} remaining")
             return data
 
     def writeData(self, data: bytes) -> int:
         with QMutexLocker(self.mutex):
-            print(f"writeData: appending {len(data)} bytes")
+            logger.debug(f"writeData: appending {len(data)} bytes")
             self.audio_buffer.extend(data)
             return len(data)
 
     def bytesAvailable(self) -> int:
         with QMutexLocker(self.mutex):
             available = len(self.audio_buffer) + super().bytesAvailable()
-            print(f"bytesAvailable: {available}")
+            logger.debug(f"bytesAvailable: {available}")
             return available
 
     def isSequential(self) -> bool:
@@ -90,7 +100,7 @@ class WebSocketClient(QThread):
         try:
             self.ws = await websockets.connect(ws_url)
             self.connection_status.emit(True)
-            print(f"Frontend: WebSocket connected to {ws_url}")
+            logger.info(f"Frontend: WebSocket connected to {ws_url}")
 
             while self.running:
                 try:
@@ -102,10 +112,10 @@ class WebSocketClient(QThread):
                             audio_data = message[len(prefix):]
                         else:
                             audio_data = message
-                        print(f"Frontend: Received binary message of size: {len(audio_data)} bytes")
+                        logger.info(f"Frontend: Received binary message of size: {len(audio_data)} bytes")
                         self.audio_received.emit(audio_data)
                     else:
-                        print(f"Frontend: Received text message: {message[:100]}...")  
+                        logger.info(f"Frontend: Received text message: {message[:100]}...")
                         try:
                             data = json.loads(message)
                             if "content" in data:
@@ -113,15 +123,15 @@ class WebSocketClient(QThread):
                             elif "stt_text" in data:
                                 self.stt_text_received.emit(data["stt_text"])
                         except json.JSONDecodeError:
-                            print(f"Frontend: Failed to parse JSON message: {message}")
+                            logger.error(f"Frontend: Failed to parse JSON message: {message}")
                 except websockets.exceptions.ConnectionClosed:
-                    print("Frontend: WebSocket connection closed")
+                    logger.info("Frontend: WebSocket connection closed")
                     break
                 except Exception as e:
-                    print(f"Frontend: Error processing WebSocket message: {e}")
+                    logger.error(f"Frontend: Error processing WebSocket message: {e}")
                     break
         except Exception as e:
-            print(f"Frontend: WebSocket connection error: {e}")
+            logger.error(f"Frontend: WebSocket connection error: {e}")
         finally:
             self.connection_status.emit(False)
 
@@ -260,27 +270,27 @@ class ChatWindow(QMainWindow):
         audio_format.setChannelCount(1)
         audio_format.setSampleFormat(QAudioFormat.SampleFormat.Int16)
 
-        print(f"Audio Format - Sample Rate: {audio_format.sampleRate()}")
-        print(f"Audio Format - Channels: {audio_format.channelCount()}")
-        print(f"Audio Format - Sample Format: {audio_format.sampleFormat()}")
+        logger.info(f"Audio Format - Sample Rate: {audio_format.sampleRate()}")
+        logger.info(f"Audio Format - Channels: {audio_format.channelCount()}")
+        logger.info(f"Audio Format - Sample Format: {audio_format.sampleFormat()}")
 
         device = QMediaDevices.defaultAudioOutput()
         if device is None:
-            print("Error: No audio output device found!")
+            logger.error("Error: No audio output device found!")
         else:
-            print(f"Using audio device: {device.description()}")
+            logger.info(f"Using audio device: {device.description()}")
 
         self.audio_sink = QAudioSink(device, audio_format)
-        print(f"Audio sink created with state: {self.audio_sink.state()}")
+        logger.info(f"Audio sink created with state: {self.audio_sink.state()}")
         self.audio_sink.setVolume(1.0)
-        print(f"Audio sink volume: {self.audio_sink.volume()}")
+        logger.info(f"Audio sink volume: {self.audio_sink.volume()}")
 
         self.audio_device = QueueAudioDevice()
         self.audio_device.open(QIODevice.OpenModeFlag.ReadOnly)
-        print(f"Audio device opened: {self.audio_device.isOpen()}")
+        logger.info(f"Audio device opened: {self.audio_device.isOpen()}")
 
         self.audio_sink.start(self.audio_device)
-        print(f"Audio sink started with state: {self.audio_sink.state()}")
+        logger.info(f"Audio sink started with state: {self.audio_sink.state()}")
 
         self.audio_queue = asyncio.Queue()
         self.audio_timer = QTimer()
@@ -384,7 +394,7 @@ class ChatWindow(QMainWindow):
                 self.stt_enabled = False
             self.toggle_stt_button.setText("STT On" if self.stt_enabled else "STT Off")
         except requests.RequestException as e:
-            print(f"Error toggling STT: {e}")
+            logger.error(f"Error toggling STT: {e}")
         finally:
             self.is_toggling_stt = False
 
@@ -400,7 +410,7 @@ class ChatWindow(QMainWindow):
                 stop_resp.raise_for_status()
             self.toggle_tts_button.setText("TTS On" if self.tts_enabled else "TTS Off")
         except requests.RequestException as e:
-            print(f"Error toggling TTS: {e}")
+            logger.error(f"Error toggling TTS: {e}")
         finally:
             self.is_toggling_tts = False
 
@@ -409,16 +419,16 @@ class ChatWindow(QMainWindow):
             requests.post(f"{HTTP_BASE_URL}/api/stop-tts").raise_for_status()
             requests.post(f"{HTTP_BASE_URL}/api/stop-generation").raise_for_status()
         except requests.RequestException as e:
-            print(f"Error stopping TTS and generation: {e}")
+            logger.error(f"Error stopping TTS and generation: {e}")
         self.finalize_assistant_bubble()
 
     def on_audio_received(self, pcm_data: bytes):
-        print(f"Frontend: Processing audio chunk of size: {len(pcm_data)} bytes")
+        logger.info(f"Frontend: Processing audio chunk of size: {len(pcm_data)} bytes")
         self.audio_queue.put_nowait(pcm_data)
 
     def feed_audio_data(self):
         if self.audio_sink.state() != QAudio.State.ActiveState:
-            print(f"Warning: Audio sink not active! State: {self.audio_sink.state()}")
+            logger.warning(f"Warning: Audio sink not active! State: {self.audio_sink.state()}")
             self.audio_sink.start(self.audio_device)
             return
 
@@ -430,7 +440,7 @@ class ChatWindow(QMainWindow):
                 try:
                     pcm_chunk = self.audio_queue.get_nowait()
                     if pcm_chunk is None:
-                        print("Received end-of-stream marker")
+                        logger.info("Received end-of-stream marker")
                         break
                     chunk_size = len(pcm_chunk)
                     total_bytes += chunk_size
@@ -441,21 +451,21 @@ class ChatWindow(QMainWindow):
                     break
             
             if chunks_processed > 0:
-                print("Audio Stats:")
-                print(f"- Chunks processed: {chunks_processed}")
-                print(f"- Total bytes processed: {total_bytes}")
+                logger.debug("Audio Stats:")
+                logger.debug(f"- Chunks processed: {chunks_processed}")
+                logger.debug(f"- Total bytes processed: {total_bytes}")
                 with QMutexLocker(self.audio_device.mutex):
-                    print(f"- Current buffer size: {len(self.audio_device.audio_buffer)}")
-                print(f"- Sink state: {self.audio_sink.state()}")
-                print(f"- Sink volume: {self.audio_sink.volume()}")
+                    logger.debug(f"- Current buffer size: {len(self.audio_device.audio_buffer)}")
+                logger.debug(f"- Sink state: {self.audio_sink.state()}")
+                logger.debug(f"- Sink volume: {self.audio_sink.volume()}")
                 
                 # Optionally, restart the sink if not active
                 if self.audio_sink.state() != QAudio.State.ActiveState:
-                    print("Restarting audio sink...")
+                    logger.info("Restarting audio sink...")
                     self.audio_sink.start(self.audio_device)
                     
         except Exception as e:
-            print(f"Error in feed_audio_data: {e}")
+            logger.error(f"Error in feed_audio_data: {e}")
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)

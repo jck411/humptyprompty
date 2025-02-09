@@ -71,7 +71,10 @@ async def unified_chat_websocket(websocket: WebSocket):
     await websocket.accept()
     connected_websockets.add(websocket)
 
-    stt_task = asyncio.create_task(stream_stt_to_client(websocket))
+    # Only start STT streaming if backend STT is enabled
+    stt_task = None
+    if CONFIG["STT_SETTINGS"]["LOCATION"] == "backend":
+        stt_task = asyncio.create_task(stream_stt_to_client(websocket))
 
     try:
         while True:
@@ -131,7 +134,8 @@ async def unified_chat_websocket(websocket: WebSocket):
     except Exception:
         pass
     finally:
-        stt_task.cancel()
+        if stt_task:
+            stt_task.cancel()
         connected_websockets.discard(websocket)
         stt_instance.pause_listening()
         await broadcast_stt_state()
