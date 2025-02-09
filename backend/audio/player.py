@@ -1,6 +1,5 @@
 import threading
 import pyaudio
-from backend.config.config import log_startup, log_shutdown
 from backend.audio.singleton import PyAudioSingleton
 
 
@@ -25,7 +24,6 @@ class AudioPlayer:
                     frames_per_buffer=1024
                 )
                 self.is_playing = True
-                log_startup("Audio stream started.")
 
     def stop_stream(self):
         with self.lock:
@@ -34,7 +32,6 @@ class AudioPlayer:
                 self.stream.close()
                 self.stream = None
                 self.is_playing = False
-                log_shutdown("Audio stream stopped.")
 
     def write_audio(self, data: bytes):
         with self.lock:

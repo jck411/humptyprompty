@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import os
 import openai
 from typing import Dict, Any, Optional
@@ -19,18 +20,15 @@ CONFIG: Dict[str, Any] = {
             "MODEL": "meta-llama/llama-3.1-70b-instruct"
         },
     },
-
     "GENERAL_TTS": {
         "TTS_PROVIDER": "azure",
         "TTS_ENABLED": True
     },
-
     "PROCESSING_PIPELINE": {
         "USE_SEGMENTATION": True,
         "DELIMITERS": ["\n", ". ", "? ", "! ", "* "],
-        "CHARACTER_MAXIMUM": 50,
+        "CHARACTER_MAXIMUM": 50, # will only segment for the initial characters listed here, the rest will just stream
     },
-    
     "TTS_MODELS": {
         "OPENAI_TTS": {
             "TTS_CHUNK_SIZE": 1024,
@@ -71,67 +69,30 @@ CONFIG: Dict[str, Any] = {
         "FORMAT": 16,
         "CHANNELS": 1,
         "RATE": 24000,
-        "FRONTEND_PLAYBACK": True  # Add this flag to control frontend playback
+        "FRONTEND_PLAYBACK": True
     },
     "LOGGING": {
-        "PRINT_ENABLED": True,
         "PRINT_SEGMENTS": True,
         "PRINT_TOOL_CALLS": True,
-        "PRINT_FUNCTION_CALLS": True
+         "PRINT_FUNCTION_CALLS": True
+
     }
 }
 
-def conditional_print(message: str, print_type: str = "default") -> None:
-    """
-    Print messages based on configuration settings.
-    
-    Args:
-        message (str): The message to print
-        print_type (str): Type of message ('segment', 'tool_call', 'function_call', or 'default')
-    """
-    if print_type == "segment" and CONFIG["LOGGING"]["PRINT_SEGMENTS"]:
-        print(f"[SEGMENT] {message}")
-    elif print_type == "tool_call" and CONFIG["LOGGING"]["PRINT_TOOL_CALLS"]:
-        print(f"[TOOL CALL] {message}")
-    elif print_type == "function_call" and CONFIG["LOGGING"]["PRINT_FUNCTION_CALLS"]:
-        print(f"[FUNCTION CALL] {message}")
-    elif CONFIG["LOGGING"]["PRINT_ENABLED"]:
-        print(f"[INFO] {message}")
-
-def log_error(message: str, error: Optional[Exception] = None) -> None:
-    """Log error messages with optional exception details."""
-    error_msg = f"[ERROR] {message}"
-    if error:
-        error_msg += f": {str(error)}"
-    print(error_msg)
-
-def log_startup(message: str) -> None:
-    """Log startup-related messages."""
-    print(f"[STARTUP] {message}")
-
-def log_shutdown(message: str) -> None:
-    """Log shutdown-related messages."""
-    print(f"[SHUTDOWN] {message}")
-
 def setup_chat_client():
-    """Initialize and return the appropriate chat client based on configuration."""
     api_host = CONFIG["API_SETTINGS"]["API_HOST"].lower()
-
     if api_host == "openai":
         client = openai.AsyncOpenAI(
             api_key=os.getenv("OPENAI_API_KEY"),
             base_url=CONFIG["API_SERVICES"]["openai"]["BASE_URL"]
         )
         deployment_name = CONFIG["API_SERVICES"]["openai"]["MODEL"]
-
     elif api_host == "openrouter":
         client = openai.AsyncOpenAI(
             api_key=os.getenv("OPENROUTER_API_KEY"),
             base_url=CONFIG["API_SERVICES"]["openrouter"]["BASE_URL"]
         )
         deployment_name = CONFIG["API_SERVICES"]["openrouter"]["MODEL"]
-    
     else:
         raise ValueError(f"Unsupported API_HOST: {api_host}")
-
     return client, deployment_name

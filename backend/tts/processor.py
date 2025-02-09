@@ -1,8 +1,7 @@
 import asyncio
 from typing import Optional, Callable
 
-
-from backend.config.config import CONFIG, conditional_print, log_error, log_shutdown
+from backend.config.config import CONFIG
 from backend.stt.azure_stt import stt_instance, broadcast_stt_state
 from backend.audio.player import create_audio_player
 
@@ -17,23 +16,20 @@ def audio_player_sync(audio_queue: asyncio.Queue, loop: asyncio.AbstractEventLoo
         audio_player.start_stream()
         while True:
             if stop_event.is_set():
-                log_shutdown("TTS stop_event is set. Audio player will stop.")
                 return
 
             future = asyncio.run_coroutine_threadsafe(audio_queue.get(), loop)
             audio_data = future.result()
 
             if audio_data is None:
-                log_shutdown("audio_player_sync received None (end of TTS).")
                 return
 
             try:
                 audio_player.write_audio(audio_data)
-            except Exception as e:
-                log_error("Audio playback error", e)
+            except Exception:
                 return
-    except Exception as e:
-        log_error("audio_player_sync encountered an error", e)
+    except Exception:
+        pass
     finally:
         audio_player.stop_stream()
 
@@ -68,7 +64,6 @@ async def process_streams(phrase_queue: asyncio.Queue, audio_queue: asyncio.Queu
         loop = asyncio.get_running_loop()
 
         stt_instance.pause_listening()
-        conditional_print("STT paused before starting TTS.", "segment")
 
         tts_task = asyncio.create_task(tts_processor(phrase_queue, audio_queue, stop_event))
         
@@ -82,10 +77,8 @@ async def process_streams(phrase_queue: asyncio.Queue, audio_queue: asyncio.Queu
             await tts_task
 
         stt_instance.start_listening()
-        conditional_print("STT resumed after completing TTS.", "segment")
         await broadcast_stt_state()
 
-    except Exception as e:
-        conditional_print(f"Error in process_streams: {e}", "default")
+    except Exception:
         stt_instance.start_listening()
         await broadcast_stt_state()
