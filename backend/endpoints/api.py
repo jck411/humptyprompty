@@ -2,6 +2,9 @@ from fastapi import APIRouter, HTTPException, Response
 from backend.config.config import CONFIG
 from backend.stt.azure_stt import stt_instance, broadcast_stt_state
 from backend.tts.processor import audio_player
+from backend.endpoints.state import GEN_STOP_EVENT
+from backend.endpoints.state import TTS_STOP_EVENT
+
 
 router = APIRouter(prefix="/api")
 
@@ -56,12 +59,14 @@ async def toggle_tts():
 @router.post("/stop-tts")
 async def stop_tts():
     """
-    Manually set the global TTS_STOP_EVENT.
-    Any ongoing TTS/audio streaming will stop soon after it checks the event.
+    Sets the TTS_STOP_EVENT which stops both TTS processing and audio playback
+    (whether frontend or backend).
     """
-    from main import TTS_STOP_EVENT  # Import here to avoid circular imports
     TTS_STOP_EVENT.set()
-    return {"detail": "TTS stop event triggered. Ongoing TTS tasks should exit soon."}
+    return {
+        "detail": "TTS and audio playback stopped",
+        "tts_stopped": True
+    }
 
 @router.post("/stop-generation")
 async def stop_generation():
@@ -69,6 +74,6 @@ async def stop_generation():
     Manually set the global GEN_STOP_EVENT.
     Any ongoing streaming text generation will stop soon after it checks the event.
     """
-    from main import GEN_STOP_EVENT  # Import here to avoid circular imports
+
     GEN_STOP_EVENT.set()
     return {"detail": "Generation stop event triggered. Ongoing text generation will exit soon."}

@@ -29,6 +29,8 @@ from backend.models.openaisdk import validate_messages_for_ws, stream_openai_com
 from backend.tts.processor import process_streams, audio_player
 from backend.endpoints.api import router as api_router
 from backend.wakewords.detector import start_wake_word_thread
+# Import the global events from the state module
+from backend.endpoints.state import TTS_STOP_EVENT, GEN_STOP_EVENT
 
 from contextlib import asynccontextmanager
 
@@ -37,9 +39,6 @@ load_dotenv()
 client, DEPLOYMENT_NAME = setup_chat_client()
 
 pyaudio_instance = PyAudioSingleton()
-
-TTS_STOP_EVENT = asyncio.Event()
-GEN_STOP_EVENT = asyncio.Event()
 
 def shutdown():
     shutdown_audio(audio_player)
@@ -90,7 +89,7 @@ async def unified_chat_websocket(websocket: WebSocket):
                 await broadcast_stt_state()
 
             elif action == "chat":
-                # Existing chat processing code...
+                # Clear events to start fresh for the new chat.
                 TTS_STOP_EVENT.clear()
                 GEN_STOP_EVENT.clear()
 
@@ -129,10 +128,6 @@ async def unified_chat_websocket(websocket: WebSocket):
                     await process_streams_task
                     if audio_forward_task:
                         await audio_forward_task
-
-                    # If using local playback, STT will resume here automatically.
-                    # For frontend playback, STT should now be resumed upon receiving a playback-complete message.
-                    # So we do not start STT here.
             
             elif action == "playback-complete":
                 # Received a notification from the client that TTS playback has finished.
@@ -149,10 +144,12 @@ async def unified_chat_websocket(websocket: WebSocket):
         connected_websockets.discard(websocket)
         stt_instance.pause_listening()
         await broadcast_stt_state()
-        await websocket.send_json({"is_listening": False})
+        # If the websocket is still open, send a final state.
+        try:
+            await websocket.send_json({"is_listening": False})
+        except Exception:
+            pass
         await websocket.close()
-
-
 
 async def forward_audio_to_websocket(
     audio_queue: asyncio.Queue, 
@@ -160,7 +157,10 @@ async def forward_audio_to_websocket(
     stop_event: asyncio.Event
 ):
     try:
-        while not stop_event.is_set():
+        while True:
+            if stop_event.is_set():
+                break
+                
             try:
                 audio_data = await audio_queue.get()
                 if audio_data is None:

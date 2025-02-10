@@ -36,16 +36,30 @@ def audio_player_sync(audio_queue: asyncio.Queue, loop: asyncio.AbstractEventLoo
 async def start_audio_player_async(audio_queue: asyncio.Queue, loop: asyncio.AbstractEventLoop, stop_event: asyncio.Event):
     await asyncio.to_thread(audio_player_sync, audio_queue, loop, stop_event)
 
+#!/usr/bin/env python3
+import asyncio
+from backend.config.config import CONFIG
+from backend.stt.azure_stt import stt_instance, broadcast_stt_state
+from backend.audio.player import create_audio_player
+
+audio_player = create_audio_player()
+
+async def start_audio_player_async(audio_queue: asyncio.Queue, loop: asyncio.AbstractEventLoop, stop_event: asyncio.Event):
+    await asyncio.to_thread(audio_player_sync, audio_queue, loop, stop_event)
+
 async def process_streams(phrase_queue: asyncio.Queue, audio_queue: asyncio.Queue, stop_event: asyncio.Event):
     """
     Orchestrates TTS tasks + audio playback, with an external stop_event.
+    Ensures that a termination signal is sent to the audio_queue in both frontend and backend playback modes.
     """
     if not CONFIG["GENERAL_TTS"]["TTS_ENABLED"]:
-        # Just drain phrase_queue if TTS is disabled
+        # If TTS is disabled, just drain the phrase_queue...
         while True:
             phrase = await phrase_queue.get()
             if phrase is None:
                 break
+        # …and signal termination to any audio forwarders.
+        await audio_queue.put(None)
         return
 
     try:
@@ -53,11 +67,9 @@ async def process_streams(phrase_queue: asyncio.Queue, audio_queue: asyncio.Queu
         if provider == "azure":
             from backend.tts.azuretts import azure_text_to_speech_processor
             tts_processor = azure_text_to_speech_processor
-            playback_rate = CONFIG["TTS_MODELS"]["AZURE_TTS"]["PLAYBACK_RATE"]
         elif provider == "openai":
             from backend.tts.openaitts import openai_text_to_speech_processor
             tts_processor = openai_text_to_speech_processor
-            playback_rate = CONFIG["TTS_MODELS"]["OPENAI_TTS"]["PLAYBACK_RATE"]
         else:
             raise ValueError(f"Unsupported TTS provider: {provider}")
 
@@ -65,15 +77,16 @@ async def process_streams(phrase_queue: asyncio.Queue, audio_queue: asyncio.Queu
 
         stt_instance.pause_listening()
 
+        # Start the TTS processor – it will write audio chunks into audio_queue.
         tts_task = asyncio.create_task(tts_processor(phrase_queue, audio_queue, stop_event))
         
-        # Only start local audio playback if frontend playback is disabled
         if not CONFIG["AUDIO_PLAYBACK_CONFIG"]["FRONTEND_PLAYBACK"]:
-            audio_player_task = asyncio.create_task(
-                start_audio_player_async(audio_queue, loop, stop_event)
-            )
+            # When frontend playback is disabled, start local audio playback.
+            from backend.tts.processor import start_audio_player_async
+            audio_player_task = asyncio.create_task(start_audio_player_async(audio_queue, loop, stop_event))
             await asyncio.gather(tts_task, audio_player_task)
         else:
+            # When using frontend playback, just run the TTS task.
             await tts_task
 
         stt_instance.start_listening()
@@ -82,3 +95,7 @@ async def process_streams(phrase_queue: asyncio.Queue, audio_queue: asyncio.Queu
     except Exception:
         stt_instance.start_listening()
         await broadcast_stt_state()
+    finally:
+        # *** IMPORTANT: Always signal termination to the audio_queue ***
+        await audio_queue.put(None)
+

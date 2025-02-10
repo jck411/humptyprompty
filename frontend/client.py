@@ -411,18 +411,30 @@ class ChatWindow(QMainWindow):
     def toggle_tts(self):
         self.is_toggling_tts = True
         try:
+            # Toggle the TTS state on the server.
             resp = requests.post(f"{HTTP_BASE_URL}/api/toggle-tts")
             resp.raise_for_status()
             data = resp.json()
+            # Update the local flag with the server's response.
             self.tts_enabled = data.get("tts_enabled", self.tts_enabled)
+            
+            # If TTS is now disabled, immediately stop any ongoing audio playback.
             if not self.tts_enabled:
                 stop_resp = requests.post(f"{HTTP_BASE_URL}/api/stop-tts")
                 stop_resp.raise_for_status()
-            self.toggle_tts_button.setText("TTS On" if self.tts_enabled else "TTS Off")
+                # Signal termination of the local audio stream by putting a None marker in the audio queue.
+                self.audio_queue.put_nowait(None)
+            
+            # Update the toggle button's text accordingly:
+            # "TTS Off" means TTS is enabled (clicking it will disable TTS)
+            # "TTS On" means TTS is disabled (clicking it will enable TTS)
+            self.toggle_tts_button.setText("TTS Off" if self.tts_enabled else "TTS On")
         except requests.RequestException as e:
             logger.error(f"Error toggling TTS: {e}")
         finally:
             self.is_toggling_tts = False
+
+
 
     def stop_tts_and_generation(self):
         try:
