@@ -69,7 +69,7 @@ CONFIG: Dict[str, Any] = {
         "FORMAT": 16,
         "CHANNELS": 1,
         "RATE": 24000,
-        "FRONTEND_PLAYBACK": False
+        "FRONTEND_PLAYBACK": True
     },
     "LOGGING": {
         "PRINT_SEGMENTS": True,

@@ -90,6 +90,7 @@ async def unified_chat_websocket(websocket: WebSocket):
                 await broadcast_stt_state()
 
             elif action == "chat":
+                # Existing chat processing code...
                 TTS_STOP_EVENT.clear()
                 GEN_STOP_EVENT.clear()
 
@@ -102,12 +103,10 @@ async def unified_chat_websocket(websocket: WebSocket):
                 stt_instance.pause_listening()
                 await broadcast_stt_state()
 
-                # Start TTS processing
                 process_streams_task = asyncio.create_task(process_streams(
                     phrase_queue, audio_queue, TTS_STOP_EVENT
                 ))
 
-                # Only create the audio forwarding task if frontend playback is enabled.
                 audio_forward_task = None
                 if CONFIG["AUDIO_PLAYBACK_CONFIG"]["FRONTEND_PLAYBACK"]:
                     audio_forward_task = asyncio.create_task(forward_audio_to_websocket(
@@ -126,14 +125,19 @@ async def unified_chat_websocket(websocket: WebSocket):
                             break
                         await websocket.send_json({"content": content})
                 finally:
-                    # Signal TTS to finish up
                     await phrase_queue.put(None)
                     await process_streams_task
                     if audio_forward_task:
                         await audio_forward_task
 
-                    stt_instance.start_listening()
-                    await broadcast_stt_state()
+                    # If using local playback, STT will resume here automatically.
+                    # For frontend playback, STT should now be resumed upon receiving a playback-complete message.
+                    # So we do not start STT here.
+            
+            elif action == "playback-complete":
+                # Received a notification from the client that TTS playback has finished.
+                stt_instance.start_listening()
+                await broadcast_stt_state()
 
     except WebSocketDisconnect:
         pass
@@ -147,6 +151,7 @@ async def unified_chat_websocket(websocket: WebSocket):
         await broadcast_stt_state()
         await websocket.send_json({"is_listening": False})
         await websocket.close()
+
 
 
 async def forward_audio_to_websocket(

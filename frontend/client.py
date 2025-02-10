@@ -146,6 +146,13 @@ class WebSocketClient(QThread):
                 "messages": self.messages
             }))
 
+    async def send_playback_complete(self):
+        """
+        New coroutine that sends a notification to the backend indicating that TTS playback has finished.
+        """
+        if self.ws:
+            await self.ws.send(json.dumps({"action": "playback-complete"}))
+
     def handle_assistant_message(self, message):
         self.messages.append({
             "sender": "assistant",
@@ -203,6 +210,9 @@ class ChatWindow(QMainWindow):
         self.is_toggling_tts = False
         self.stt_enabled = False
         self.is_toggling_stt = False
+
+        # Flag to ensure we only notify playback complete once per TTS stream.
+        self.playback_complete_notified = False
 
         # Main layout setup
         main_widget = QWidget()
@@ -424,6 +434,8 @@ class ChatWindow(QMainWindow):
 
     def on_audio_received(self, pcm_data: bytes):
         logger.info(f"Frontend: Processing audio chunk of size: {len(pcm_data)} bytes")
+        # Reset the flag if new audio data arrives.
+        self.playback_complete_notified = False
         self.audio_queue.put_nowait(pcm_data)
 
     def feed_audio_data(self):
@@ -441,6 +453,10 @@ class ChatWindow(QMainWindow):
                     pcm_chunk = self.audio_queue.get_nowait()
                     if pcm_chunk is None:
                         logger.info("Received end-of-stream marker")
+                        # Notify the backend only once per stream.
+                        if not self.playback_complete_notified:
+                            self.notify_playback_complete()
+                            self.playback_complete_notified = True
                         break
                     chunk_size = len(pcm_chunk)
                     total_bytes += chunk_size
@@ -466,6 +482,18 @@ class ChatWindow(QMainWindow):
                     
         except Exception as e:
             logger.error(f"Error in feed_audio_data: {e}")
+
+    def notify_playback_complete(self):
+        """
+        Called when the audio stream has finished.
+        We send a 'playback-complete' notification to the backend over the WebSocket.
+        """
+        try:
+            # We use asyncio.run here because this method is called from a synchronous context.
+            asyncio.run(self.ws_client.send_playback_complete())
+            logger.info("Notified backend of playback completion.")
+        except Exception as e:
+            logger.error(f"Error notifying playback complete: {e}")
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
