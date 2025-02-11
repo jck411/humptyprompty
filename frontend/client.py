@@ -3,235 +3,47 @@ import sys
 import json
 import asyncio
 import requests
-import websockets
-import aiohttp
 import logging
-
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QTextEdit, QPushButton, QScrollArea, QFrame, QLabel
+    QPushButton, QScrollArea
 )
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer, QIODevice, QMutex, QMutexLocker, QEvent, QSize
-from PyQt6.QtGui import QColor, QPalette, QIcon, QKeyEvent
-from PyQt6.QtMultimedia import (
-    QAudioFormat,
-    QAudioSink,
-    QMediaDevices,
-    QAudio,
+from PyQt6.QtCore import Qt, QTimer, QSize, QMutexLocker
+from PyQt6.QtGui import QColor, QPalette, QIcon
+from PyQt6.QtMultimedia import QAudio
+
+from config import (
+    SERVER_HOST, SERVER_PORT, WEBSOCKET_PATH, HTTP_BASE_URL,
+    COLORS, DARK_COLORS, LIGHT_COLORS, logger
 )
-
-# ===================== Logging Configuration =====================
-LOG_LEVEL = logging.WARNING  # Change this to adjust the logging level: DEBUG, INFO, WARNING, ERROR, CRITICAL.
-logging.basicConfig(
-    level=LOG_LEVEL,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S"
-)
-logger = logging.getLogger(__name__)
-
-# ===================== Server Configuration =====================
-# Replace with your server machine's IP address, port, and WebSocket path.
-SERVER_HOST = "192.168.1.226"  # <-- CHANGE THIS to your server's local IP
-SERVER_PORT = 8000
-WEBSOCKET_PATH = "/ws/chat"
-HTTP_BASE_URL = f"http://{SERVER_HOST}:{SERVER_PORT}"
-
-# ===================== Color Scheme =====================
-COLORS = {
-    'background': '#F0F2F5',
-    'user_bubble': '#DCF8C6',
-    'assistant_bubble': '#E8E8E8',
-    'text_primary': '#000000',
-    'text_secondary': '#666666',
-    'button_primary': '#0D8BD9',
-    'button_hover': '#0A6CA8',
-    'button_pressed': '#084E7A',
-    'input_background': '#FFFFFF',
-    'input_border': '#E0E0E0'
-}
-
-# ===================== QueueAudioDevice =====================
-class QueueAudioDevice(QIODevice):
-    def __init__(self):
-        super().__init__()
-        self.audio_buffer = bytearray()
-        self.mutex = QMutex()
-        logger.debug("QueueAudioDevice initialized")
-
-    def readData(self, maxSize: int) -> bytes:
-        with QMutexLocker(self.mutex):
-            if len(self.audio_buffer) == 0:
-                logger.debug("Audio buffer empty, returning silence")
-                return bytes(maxSize)
-            data = bytes(self.audio_buffer[:maxSize])
-            self.audio_buffer = self.audio_buffer[maxSize:]
-            logger.debug(f"Reading {len(data)} bytes from buffer, {len(self.audio_buffer)} remaining")
-            return data
-
-    def writeData(self, data: bytes) -> int:
-        with QMutexLocker(self.mutex):
-            logger.debug(f"writeData: appending {len(data)} bytes")
-            self.audio_buffer.extend(data)
-            return len(data)
-
-    def bytesAvailable(self) -> int:
-        with QMutexLocker(self.mutex):
-            available = len(self.audio_buffer) + super().bytesAvailable()
-            logger.debug(f"bytesAvailable: {available}")
-            return available
-
-    def isSequential(self) -> bool:
-        return True
-
-# ===================== WebSocketClient =====================
-class WebSocketClient(QThread):
-    message_received = pyqtSignal(str)
-    stt_text_received = pyqtSignal(str)
-    connection_status = pyqtSignal(bool)
-    audio_received = pyqtSignal(bytes)  # PCM audio data
-    tts_state_changed = pyqtSignal(bool)  # New signal for TTS state changes
-
-    def __init__(self):
-        super().__init__()
-        self.ws = None
-        self.running = True
-        self.messages = []
-
-    async def connect(self):
-        ws_url = f"ws://{SERVER_HOST}:{SERVER_PORT}{WEBSOCKET_PATH}"
-        try:
-            self.ws = await websockets.connect(ws_url)
-            self.connection_status.emit(True)
-            logger.info(f"Frontend: WebSocket connected to {ws_url}")
-
-            # Get initial TTS state when WebSocket connects
-            try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.post(f"{HTTP_BASE_URL}/api/toggle-tts") as resp:
-                        if resp.status == 200:
-                            data = await resp.json()
-                            # Emit a special signal to update TTS state
-                            self.tts_state_changed.emit(data.get("tts_enabled", False))
-            except Exception as e:
-                logger.error(f"Error getting initial TTS state: {e}")
-
-            while self.running:
-                try:
-                    message = await self.ws.recv()
-                    if isinstance(message, bytes):
-                        # Remove the 'audio:' prefix if present.
-                        prefix = b'audio:'
-                        if message.startswith(prefix):
-                            audio_data = message[len(prefix):]
-                        else:
-                            audio_data = message
-                        logger.info(f"Frontend: Received binary message of size: {len(audio_data)} bytes")
-                        self.audio_received.emit(audio_data)
-                    else:
-                        logger.info(f"Frontend: Received text message: {message[:100]}...")
-                        try:
-                            data = json.loads(message)
-                            if "content" in data:
-                                self.message_received.emit(data["content"])
-                            elif "stt_text" in data:
-                                self.stt_text_received.emit(data["stt_text"])
-                        except json.JSONDecodeError:
-                            logger.error(f"Frontend: Failed to parse JSON message: {message}")
-                except websockets.exceptions.ConnectionClosed:
-                    logger.info("Frontend: WebSocket connection closed")
-                    break
-                except Exception as e:
-                    logger.error(f"Frontend: Error processing WebSocket message: {e}")
-                    break
-        except Exception as e:
-            logger.error(f"Frontend: WebSocket connection error: {e}")
-        finally:
-            self.connection_status.emit(False)
-
-    async def send_message(self, message):
-        if self.ws:
-            self.messages.append({
-                "sender": "user",
-                "text": message
-            })
-            await self.ws.send(json.dumps({
-                "action": "chat",
-                "messages": self.messages
-            }))
-
-    async def send_playback_complete(self):
-        """
-        New coroutine that sends a notification to the backend indicating that TTS playback has finished.
-        """
-        if self.ws:
-            await self.ws.send(json.dumps({"action": "playback-complete"}))
-
-    def handle_assistant_message(self, message):
-        self.messages.append({
-            "sender": "assistant",
-            "text": message
-        })
-
-    def run(self):
-        asyncio.run(self.connect())
-
-# ===================== MessageBubble =====================
-class MessageBubble(QFrame):
-    def __init__(self, text, is_user=True, parent=None):
-        super().__init__(parent)
-        self.setObjectName("messageBubble")
-        layout = QVBoxLayout()
-        layout.setContentsMargins(5, 5, 5, 5)  # Reduced padding inside bubble
-        self.setLayout(layout)
-        self.label = QLabel(text)
-        self.label.setWordWrap(True)
-        self.label.setTextFormat(Qt.TextFormat.RichText)
-        self.label.setOpenExternalLinks(True)
-        self.setStyleSheet(f"""
-            QFrame#messageBubble {{
-                background-color: {COLORS['user_bubble'] if is_user else COLORS['assistant_bubble']};
-                border-radius: 15px;
-                padding: 5px;
-                margin: {'5px 50px 5px 5px' if is_user else '5px 5px 5px 50px'};
-            }}
-            QLabel {{
-                color: {COLORS['text_primary']};
-                font-size: 14px;
-            }}
-        """)
-        layout.addWidget(self.label)
-        layout.setContentsMargins(5, 5, 5, 5)  # Reduced margins
-    
-    def update_text(self, new_text):
-        self.label.setText(new_text)
-    
-    def get_text(self):
-        return self.label.text()
-
-# ===================== ChatWindow =====================
-class CustomTextEdit(QTextEdit):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.parent = parent
-
-    def keyPressEvent(self, event):
-        if (event.key() == Qt.Key.Key_Return and 
-            not event.modifiers() & Qt.KeyboardModifier.ShiftModifier and 
-            self.parent is not None):
-            self.parent.send_message()
-        else:
-            super().keyPressEvent(event)
+from components import MessageBubble, CustomTextEdit
+from websocket_client import WebSocketClient
+from audio import setup_audio
 
 class ChatWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Modern Chat Interface")
         self.setMinimumSize(800, 600)
-
+        self.is_dark_mode = False
+        
         # Buffer for in-progress assistant message
         self.assistant_text_in_progress = ""
         self.assistant_bubble_in_progress = None
 
+        # Initialize states
+        self.init_states()
+        
+        # Setup UI components
+        self.setup_ui()
+        
+        # Setup WebSocket client
+        self.setup_websocket()
+        
+        # Setup audio
+        self.setup_audio()
+
+    def init_states(self):
         # Get initial TTS state from server
         try:
             resp = requests.post(f"{HTTP_BASE_URL}/api/toggle-tts")
@@ -244,38 +56,70 @@ class ChatWindow(QMainWindow):
         self.is_toggling_tts = False
         self.stt_enabled = False
         self.is_toggling_stt = False
-
-        # Flag to ensure we only notify playback complete once per TTS stream.
         self.playback_complete_notified = False
 
-        # Main layout setup
+    def setup_ui(self):
         main_widget = QWidget()
         self.setCentralWidget(main_widget)
         layout = QVBoxLayout(main_widget)
-        layout.setContentsMargins(5, 5, 5, 5)  # Minimal margins
-        layout.setSpacing(2)  # Minimal spacing between major sections
+        layout.setContentsMargins(5, 5, 5, 5)
+        layout.setSpacing(2)
 
         # Top button area
+        self.setup_top_buttons(layout)
+        
+        # Chat area
+        self.setup_chat_area(layout)
+        
+        # Input area
+        self.setup_input_area(layout)
+
+    def setup_top_buttons(self, layout):
         top_widget = QWidget()
         top_layout = QHBoxLayout(top_widget)
         top_layout.setContentsMargins(0, 0, 0, 0)
-        top_layout.setSpacing(5)  # Small gap between buttons
+        top_layout.setSpacing(5)
         
         self.toggle_stt_button = QPushButton("STT Off")
-        self.toggle_stt_button.setFixedSize(120, 40)  # Reduced height
+        self.toggle_stt_button.setFixedSize(120, 40)
         
         self.toggle_tts_button = QPushButton("TTS On" if self.tts_enabled else "TTS Off")
-        self.toggle_tts_button.setFixedSize(120, 40)  # Reduced height
+        self.toggle_tts_button.setFixedSize(120, 40)
 
         top_layout.addWidget(self.toggle_stt_button)
         top_layout.addWidget(self.toggle_tts_button)
         top_layout.addStretch()
+
+        # Theme toggle button
+        self.theme_toggle = QPushButton()
+        self.theme_toggle.setFixedSize(45, 45)
+        self.theme_toggle.setIcon(QIcon("/home/jack/humptyprompty/frontend/icons/dark_mode_24dp_E8EAED.svg"))
+        self.theme_toggle.setIconSize(QSize(35, 35))
+        self.theme_toggle.clicked.connect(self.toggle_theme)
+        self.theme_toggle.setStyleSheet("""
+            QPushButton {
+                border: none;
+                border-radius: 20px;
+                background-color: transparent;
+            }
+            QPushButton:hover {
+                background-color: rgba(128, 128, 128, 0.1);
+            }
+        """)
+        top_layout.addWidget(self.theme_toggle)
         
-        # Chat area with stretch
+        layout.addWidget(top_widget)
+
+    def setup_chat_area(self, layout):
         self.chat_area = QWidget()
+        self.chat_area.setAutoFillBackground(True)
+        chat_palette = self.chat_area.palette()
+        chat_palette.setColor(QPalette.ColorRole.Window, QColor(COLORS['background']))
+        self.chat_area.setPalette(chat_palette)
+        
         self.chat_layout = QVBoxLayout(self.chat_area)
         self.chat_layout.setContentsMargins(0, 0, 0, 0)
-        self.chat_layout.setSpacing(2)  # Minimal space between messages
+        self.chat_layout.setSpacing(2)
         self.chat_layout.addStretch()
 
         scroll = QScrollArea()
@@ -284,12 +128,18 @@ class ChatWindow(QMainWindow):
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         scroll.setContentsMargins(0, 0, 0, 0)
+        scroll.setAutoFillBackground(True)
+        scroll_palette = scroll.palette()
+        scroll_palette.setColor(QPalette.ColorRole.Window, QColor(COLORS['background']))
+        scroll.setPalette(scroll_palette)
+        
+        layout.addWidget(scroll, stretch=1)
 
-        # Input area
+    def setup_input_area(self, layout):
         input_widget = QWidget()
         input_layout = QHBoxLayout(input_widget)
         input_layout.setContentsMargins(0, 0, 0, 0)
-        input_layout.setSpacing(5)  # Small gap between input and buttons
+        input_layout.setSpacing(5)
 
         self.text_input = CustomTextEdit(self)
         self.text_input.setPlaceholderText("Type your message...")
@@ -299,7 +149,7 @@ class ChatWindow(QMainWindow):
         button_widget = QWidget()
         button_layout = QHBoxLayout(button_widget)
         button_layout.setContentsMargins(0, 0, 0, 0)
-        button_layout.setSpacing(5)  # Small gap between buttons
+        button_layout.setSpacing(5)
 
         send_button = QPushButton()
         send_button.setFixedSize(50, 50)
@@ -314,61 +164,37 @@ class ChatWindow(QMainWindow):
         button_layout.addWidget(send_button)
         button_layout.addWidget(self.stop_all_button)
 
-        input_layout.addWidget(self.text_input, stretch=1)  # Give text input stretch priority
+        input_layout.addWidget(self.text_input, stretch=1)
         input_layout.addWidget(button_widget)
 
-        # Add all sections to main layout with proper stretching
-        layout.addWidget(top_widget)
-        layout.addWidget(scroll, stretch=1)  # Give scroll area maximum stretch
         layout.addWidget(input_widget)
 
-        # Initialize WebSocket client (in its own thread)
-        self.ws_client = WebSocketClient()
-        self.ws_client.message_received.connect(self.handle_message)
-        self.ws_client.stt_text_received.connect(self.handle_stt_text)
-        self.ws_client.connection_status.connect(self.handle_connection_status)
-        self.ws_client.audio_received.connect(self.on_audio_received)
-        self.ws_client.tts_state_changed.connect(self.handle_tts_state_changed)  # Add new signal connection
-        self.ws_client.start()
-
-        # Connect signals to buttons
+        # Connect signals
         send_button.clicked.connect(self.send_message)
         self.text_input.textChanged.connect(self.adjust_text_input_height)
         self.toggle_stt_button.clicked.connect(self.toggle_stt)
         self.toggle_tts_button.clicked.connect(self.toggle_tts)
         self.stop_all_button.clicked.connect(self.stop_tts_and_generation)
-        
-        # ===================== Setup QAudio for PCM playback =====================
-        audio_format = QAudioFormat()
-        audio_format.setSampleRate(24000)
-        audio_format.setChannelCount(1)
-        audio_format.setSampleFormat(QAudioFormat.SampleFormat.Int16)
 
-        logger.info(f"Audio Format - Sample Rate: {audio_format.sampleRate()}")
-        logger.info(f"Audio Format - Channels: {audio_format.channelCount()}")
-        logger.info(f"Audio Format - Sample Format: {audio_format.sampleFormat()}")
+    def setup_websocket(self):
+        self.ws_client = WebSocketClient(
+            SERVER_HOST, 
+            SERVER_PORT, 
+            WEBSOCKET_PATH, 
+            HTTP_BASE_URL
+        )
+        self.ws_client.message_received.connect(self.handle_message)
+        self.ws_client.stt_text_received.connect(self.handle_stt_text)
+        self.ws_client.connection_status.connect(self.handle_connection_status)
+        self.ws_client.audio_received.connect(self.on_audio_received)
+        self.ws_client.tts_state_changed.connect(self.handle_tts_state_changed)
+        self.ws_client.start()
 
-        device = QMediaDevices.defaultAudioOutput()
-        if device is None:
-            logger.error("Error: No audio output device found!")
-        else:
-            logger.info(f"Using audio device: {device.description()}")
-
-        self.audio_sink = QAudioSink(device, audio_format)
-        logger.info(f"Audio sink created with state: {self.audio_sink.state()}")
-        self.audio_sink.setVolume(1.0)
-        logger.info(f"Audio sink volume: {self.audio_sink.volume()}")
-
-        self.audio_device = QueueAudioDevice()
-        self.audio_device.open(QIODevice.OpenModeFlag.ReadOnly)
-        logger.info(f"Audio device opened: {self.audio_device.isOpen()}")
-
-        self.audio_sink.start(self.audio_device)
-        logger.info(f"Audio sink started with state: {self.audio_sink.state()}")
-
+    def setup_audio(self):
+        self.audio_sink, self.audio_device = setup_audio()
         self.audio_queue = asyncio.Queue()
         self.audio_timer = QTimer()
-        self.audio_timer.setInterval(10)  # Check every 10ms
+        self.audio_timer.setInterval(10)
         self.audio_timer.timeout.connect(self.feed_audio_data)
         self.audio_timer.start()
 
@@ -379,6 +205,30 @@ class ChatWindow(QMainWindow):
             }}
             QScrollArea {{
                 border: none;
+                background-color: {COLORS['background']};
+            }}
+            QScrollBar:vertical {{
+                border: none;
+                background: {COLORS['background']};
+                width: 10px;
+                margin: 0;
+            }}
+            QScrollBar::handle:vertical {{
+                background: {COLORS['input_border']};
+                border-radius: 5px;
+                min-height: 20px;
+            }}
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
+                height: 0;
+                width: 0;
+                background: none;
+                border: none;
+            }}
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{
+                background: none;
+                border: none;
+            }}
+            QWidget {{
                 background-color: {COLORS['background']};
             }}
             QTextEdit {{
@@ -400,11 +250,9 @@ class ChatWindow(QMainWindow):
             }}
             QPushButton:hover {{
                 background-color: {COLORS['button_hover']};
-                transform: scale(1.0);
             }}
             QPushButton:pressed {{
                 background-color: {COLORS['button_pressed']};
-                transform: scale(0.95);
             }}
             QLabel {{
                 color: {COLORS['text_primary']};
@@ -413,6 +261,61 @@ class ChatWindow(QMainWindow):
         palette = self.text_input.palette()
         palette.setColor(QPalette.ColorRole.PlaceholderText, QColor(COLORS['text_secondary']))
         self.text_input.setPalette(palette)
+
+    def toggle_theme(self):
+        self.is_dark_mode = not self.is_dark_mode
+        global COLORS
+        COLORS = DARK_COLORS if self.is_dark_mode else LIGHT_COLORS
+        
+        # Update theme toggle icon
+        icon_path = "/home/jack/humptyprompty/frontend/icons/light_mode_24dp_E8EAED.svg" if self.is_dark_mode else "/home/jack/humptyprompty/frontend/icons/dark_mode_24dp_E8EAED.svg"
+        self.theme_toggle.setIcon(QIcon(icon_path))
+        
+        # Update chat area and scroll area backgrounds
+        chat_palette = self.chat_area.palette()
+        chat_palette.setColor(QPalette.ColorRole.Window, QColor(COLORS['background']))
+        self.chat_area.setPalette(chat_palette)
+        
+        scroll_area = self.findChild(QScrollArea)
+        scroll_palette = scroll_area.palette()
+        scroll_palette.setColor(QPalette.ColorRole.Window, QColor(COLORS['background']))
+        scroll_area.setPalette(scroll_palette)
+        
+        # Reapply styling with new colors
+        self.apply_styling()
+        
+        # Update existing message bubbles
+        for i in range(self.chat_layout.count()):
+            widget = self.chat_layout.itemAt(i).widget()
+            if isinstance(widget, MessageBubble):
+                is_user = widget.property("isUser")
+                if is_user:
+                    widget.setStyleSheet(f"""
+                        QFrame#messageBubble {{
+                            background-color: {COLORS['user_bubble']};
+                            border-radius: 15px;
+                            margin: 5px 50px 5px 5px;
+                            padding: 5px;
+                        }}
+                        QLabel {{
+                            color: {COLORS['text_primary']};
+                            font-size: 14px;
+                            background-color: transparent;
+                        }}
+                    """)
+                else:
+                    widget.setStyleSheet(f"""
+                        QFrame#messageBubble {{
+                            background-color: transparent;
+                            margin: 5px 5px 5px 50px;
+                            padding: 5px;
+                        }}
+                        QLabel {{
+                            color: {COLORS['text_primary']};
+                            font-size: 14px;
+                            background-color: transparent;
+                        }}
+                    """)
 
     def send_message(self):
         text = self.text_input.toPlainText().strip()
