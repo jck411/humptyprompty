@@ -4,14 +4,15 @@ import json
 import asyncio
 import requests
 import websockets
+import aiohttp
 import logging
 
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QTextEdit, QPushButton, QScrollArea, QFrame, QLabel
 )
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer, QIODevice, QMutex, QMutexLocker
-from PyQt6.QtGui import QColor, QPalette, QIcon
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer, QIODevice, QMutex, QMutexLocker, QEvent, QSize
+from PyQt6.QtGui import QColor, QPalette, QIcon, QKeyEvent
 from PyQt6.QtMultimedia import (
     QAudioFormat,
     QAudioSink,
@@ -88,6 +89,7 @@ class WebSocketClient(QThread):
     stt_text_received = pyqtSignal(str)
     connection_status = pyqtSignal(bool)
     audio_received = pyqtSignal(bytes)  # PCM audio data
+    tts_state_changed = pyqtSignal(bool)  # New signal for TTS state changes
 
     def __init__(self):
         super().__init__()
@@ -101,6 +103,17 @@ class WebSocketClient(QThread):
             self.ws = await websockets.connect(ws_url)
             self.connection_status.emit(True)
             logger.info(f"Frontend: WebSocket connected to {ws_url}")
+
+            # Get initial TTS state when WebSocket connects
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(f"{HTTP_BASE_URL}/api/toggle-tts") as resp:
+                        if resp.status == 200:
+                            data = await resp.json()
+                            # Emit a special signal to update TTS state
+                            self.tts_state_changed.emit(data.get("tts_enabled", False))
+            except Exception as e:
+                logger.error(f"Error getting initial TTS state: {e}")
 
             while self.running:
                 try:
@@ -168,6 +181,7 @@ class MessageBubble(QFrame):
         super().__init__(parent)
         self.setObjectName("messageBubble")
         layout = QVBoxLayout()
+        layout.setContentsMargins(5, 5, 5, 5)  # Reduced padding inside bubble
         self.setLayout(layout)
         self.label = QLabel(text)
         self.label.setWordWrap(True)
@@ -177,8 +191,8 @@ class MessageBubble(QFrame):
             QFrame#messageBubble {{
                 background-color: {COLORS['user_bubble'] if is_user else COLORS['assistant_bubble']};
                 border-radius: 15px;
-                padding: 10px;
-                margin: {'10px 50px 10px 10px' if is_user else '10px 10px 10px 50px'};
+                padding: 5px;
+                margin: {'5px 50px 5px 5px' if is_user else '5px 5px 5px 50px'};
             }}
             QLabel {{
                 color: {COLORS['text_primary']};
@@ -186,7 +200,7 @@ class MessageBubble(QFrame):
             }}
         """)
         layout.addWidget(self.label)
-        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setContentsMargins(5, 5, 5, 5)  # Reduced margins
     
     def update_text(self, new_text):
         self.label.setText(new_text)
@@ -195,6 +209,19 @@ class MessageBubble(QFrame):
         return self.label.text()
 
 # ===================== ChatWindow =====================
+class CustomTextEdit(QTextEdit):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.parent = parent
+
+    def keyPressEvent(self, event):
+        if (event.key() == Qt.Key.Key_Return and 
+            not event.modifiers() & Qt.KeyboardModifier.ShiftModifier and 
+            self.parent is not None):
+            self.parent.send_message()
+        else:
+            super().keyPressEvent(event)
+
 class ChatWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -205,8 +232,15 @@ class ChatWindow(QMainWindow):
         self.assistant_text_in_progress = ""
         self.assistant_bubble_in_progress = None
 
-        # TTS and STT toggle states
-        self.tts_enabled = True
+        # Get initial TTS state from server
+        try:
+            resp = requests.post(f"{HTTP_BASE_URL}/api/toggle-tts")
+            resp.raise_for_status()
+            self.tts_enabled = resp.json().get("tts_enabled", False)
+        except requests.RequestException as e:
+            logger.error(f"Error getting initial TTS state: {e}")
+            self.tts_enabled = False
+        
         self.is_toggling_tts = False
         self.stt_enabled = False
         self.is_toggling_stt = False
@@ -218,45 +252,74 @@ class ChatWindow(QMainWindow):
         main_widget = QWidget()
         self.setCentralWidget(main_widget)
         layout = QVBoxLayout(main_widget)
+        layout.setContentsMargins(5, 5, 5, 5)  # Minimal margins
+        layout.setSpacing(2)  # Minimal spacing between major sections
 
-        # Chat area
+        # Top button area
+        top_widget = QWidget()
+        top_layout = QHBoxLayout(top_widget)
+        top_layout.setContentsMargins(0, 0, 0, 0)
+        top_layout.setSpacing(5)  # Small gap between buttons
+        
+        self.toggle_stt_button = QPushButton("STT Off")
+        self.toggle_stt_button.setFixedSize(120, 40)  # Reduced height
+        
+        self.toggle_tts_button = QPushButton("TTS On" if self.tts_enabled else "TTS Off")
+        self.toggle_tts_button.setFixedSize(120, 40)  # Reduced height
+
+        top_layout.addWidget(self.toggle_stt_button)
+        top_layout.addWidget(self.toggle_tts_button)
+        top_layout.addStretch()
+        
+        # Chat area with stretch
         self.chat_area = QWidget()
         self.chat_layout = QVBoxLayout(self.chat_area)
+        self.chat_layout.setContentsMargins(0, 0, 0, 0)
+        self.chat_layout.setSpacing(2)  # Minimal space between messages
         self.chat_layout.addStretch()
 
         scroll = QScrollArea()
         scroll.setWidget(self.chat_area)
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll.setContentsMargins(0, 0, 0, 0)
 
         # Input area
         input_widget = QWidget()
         input_layout = QHBoxLayout(input_widget)
+        input_layout.setContentsMargins(0, 0, 0, 0)
+        input_layout.setSpacing(5)  # Small gap between input and buttons
 
-        self.text_input = QTextEdit()
+        self.text_input = CustomTextEdit(self)
         self.text_input.setPlaceholderText("Type your message...")
-        self.text_input.setMaximumHeight(100)
+        self.text_input.setMaximumHeight(60)
+        self.text_input.setMinimumHeight(50)
 
-        send_button = QPushButton("Send")
+        button_widget = QWidget()
+        button_layout = QHBoxLayout(button_widget)
+        button_layout.setContentsMargins(0, 0, 0, 0)
+        button_layout.setSpacing(5)  # Small gap between buttons
+
+        send_button = QPushButton()
         send_button.setFixedSize(50, 50)
-
-        self.toggle_stt_button = QPushButton("STT Off")
-        self.toggle_stt_button.setFixedSize(120, 50)
-
-        self.toggle_tts_button = QPushButton("TTS On")
-        self.toggle_tts_button.setFixedSize(120, 50)
+        send_button.setIcon(QIcon("/home/jack/humptyprompty/frontend/icons/send.svg"))
+        send_button.setIconSize(QSize(20, 20))
 
         self.stop_all_button = QPushButton()
         self.stop_all_button.setFixedSize(50, 50)
-        self.stop_all_button.setIcon(QIcon("/home/jack/AI-chat-PyQt/frontend_PyQt/icons/stop-button.png"))
+        self.stop_all_button.setIcon(QIcon("/home/jack/humptyprompty/frontend/icons/stop_all.svg"))
+        self.stop_all_button.setIconSize(QSize(30, 30))
 
-        input_layout.addWidget(self.text_input)
-        input_layout.addWidget(send_button)
-        input_layout.addWidget(self.toggle_stt_button)
-        input_layout.addWidget(self.toggle_tts_button)
-        input_layout.addWidget(self.stop_all_button)
+        button_layout.addWidget(send_button)
+        button_layout.addWidget(self.stop_all_button)
 
-        layout.addWidget(scroll)
+        input_layout.addWidget(self.text_input, stretch=1)  # Give text input stretch priority
+        input_layout.addWidget(button_widget)
+
+        # Add all sections to main layout with proper stretching
+        layout.addWidget(top_widget)
+        layout.addWidget(scroll, stretch=1)  # Give scroll area maximum stretch
         layout.addWidget(input_widget)
 
         # Initialize WebSocket client (in its own thread)
@@ -265,15 +328,16 @@ class ChatWindow(QMainWindow):
         self.ws_client.stt_text_received.connect(self.handle_stt_text)
         self.ws_client.connection_status.connect(self.handle_connection_status)
         self.ws_client.audio_received.connect(self.on_audio_received)
+        self.ws_client.tts_state_changed.connect(self.handle_tts_state_changed)  # Add new signal connection
         self.ws_client.start()
 
-        # Connect signals
+        # Connect signals to buttons
         send_button.clicked.connect(self.send_message)
         self.text_input.textChanged.connect(self.adjust_text_input_height)
         self.toggle_stt_button.clicked.connect(self.toggle_stt)
         self.toggle_tts_button.clicked.connect(self.toggle_tts)
         self.stop_all_button.clicked.connect(self.stop_tts_and_generation)
-
+        
         # ===================== Setup QAudio for PCM playback =====================
         audio_format = QAudioFormat()
         audio_format.setSampleRate(24000)
@@ -330,14 +394,17 @@ class ChatWindow(QMainWindow):
                 border-radius: 25px;
                 background-color: {COLORS['button_primary']};
                 color: white;
-                padding: 10px;
+                padding: 5px;
                 font-weight: bold;
+                font-size: 13px;
             }}
             QPushButton:hover {{
                 background-color: {COLORS['button_hover']};
+                transform: scale(1.0);
             }}
             QPushButton:pressed {{
                 background-color: {COLORS['button_pressed']};
+                transform: scale(0.95);
             }}
             QLabel {{
                 color: {COLORS['text_primary']};
@@ -350,10 +417,14 @@ class ChatWindow(QMainWindow):
     def send_message(self):
         text = self.text_input.toPlainText().strip()
         if text:
-            self.finalize_assistant_bubble()
-            self.add_message(text, True)
-            asyncio.run(self.ws_client.send_message(text))
-            self.text_input.clear()
+            try:
+                self.finalize_assistant_bubble()
+                self.add_message(text, True)
+                asyncio.run(self.ws_client.send_message(text))
+                self.text_input.clear()
+            except Exception as e:
+                logger.error(f"Error sending message: {e}")
+                # Optionally show an error to the user here
 
     def handle_message(self, token):
         if not self.assistant_bubble_in_progress:
@@ -374,6 +445,11 @@ class ChatWindow(QMainWindow):
 
     def handle_connection_status(self, connected):
         self.setWindowTitle(f"Modern Chat Interface - {'Connected' if connected else 'Disconnected'}")
+
+    def handle_tts_state_changed(self, is_enabled: bool):
+        """Handle TTS state changes from the server"""
+        self.tts_enabled = is_enabled
+        self.toggle_tts_button.setText("TTS On" if is_enabled else "TTS Off")
 
     def add_message(self, text, is_user):
         bubble = MessageBubble(text, is_user)
@@ -411,30 +487,35 @@ class ChatWindow(QMainWindow):
     def toggle_tts(self):
         self.is_toggling_tts = True
         try:
-            # Toggle the TTS state on the server.
+            # Toggle the TTS state first
             resp = requests.post(f"{HTTP_BASE_URL}/api/toggle-tts")
             resp.raise_for_status()
             data = resp.json()
-            # Update the local flag with the server's response.
+            
+            # Update the local flag with the server's response
             self.tts_enabled = data.get("tts_enabled", self.tts_enabled)
             
-            # If TTS is now disabled, immediately stop any ongoing audio playback.
+            # If we're turning TTS off, immediately stop any ongoing audio
             if not self.tts_enabled:
+                # Stop the TTS on the backend
                 stop_resp = requests.post(f"{HTTP_BASE_URL}/api/stop-tts")
                 stop_resp.raise_for_status()
-                # Signal termination of the local audio stream by putting a None marker in the audio queue.
+                # Clear local audio buffer and queue
+                self.audio_device.audio_buffer.clear()
+                while not self.audio_queue.empty():
+                    try:
+                        self.audio_queue.get_nowait()
+                    except:
+                        pass
+                # Signal termination of the audio stream
                 self.audio_queue.put_nowait(None)
             
-            # Update the toggle button's text accordingly:
-            # "TTS Off" means TTS is enabled (clicking it will disable TTS)
-            # "TTS On" means TTS is disabled (clicking it will enable TTS)
-            self.toggle_tts_button.setText("TTS Off" if self.tts_enabled else "TTS On")
+            # Update button text - fixed to show the current state
+            self.toggle_tts_button.setText("TTS On" if self.tts_enabled else "TTS Off")
         except requests.RequestException as e:
             logger.error(f"Error toggling TTS: {e}")
         finally:
             self.is_toggling_tts = False
-
-
 
     def stop_tts_and_generation(self):
         try:

@@ -22,7 +22,7 @@ CONFIG: Dict[str, Any] = {
     },
     "GENERAL_TTS": {
         "TTS_PROVIDER": "azure",
-        "TTS_ENABLED": True
+        "TTS_ENABLED": False
     },
     "PROCESSING_PIPELINE": {
         "USE_SEGMENTATION": True,
