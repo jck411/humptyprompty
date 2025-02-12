@@ -27,6 +27,10 @@ class ChatWindow(QMainWindow):
         self.setMinimumSize(800, 600)  # Keep minimum size for usability
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         
+        # Initialize kiosk mode state
+        self.is_kiosk_mode = False
+        self.normal_window_flags = self.windowFlags()
+        
         # Initialize dark mode and colors first
         self.is_dark_mode = True
         global COLORS
@@ -86,9 +90,9 @@ class ChatWindow(QMainWindow):
         self.setup_input_area(layout)
 
     def setup_top_buttons(self, layout):
-        top_widget = QWidget()
-        top_layout = QHBoxLayout(top_widget)
-        top_layout.setContentsMargins(0, 0, 0, 0)
+        self.top_widget = QWidget()  # Make it instance variable so we can modify it later
+        top_layout = QHBoxLayout(self.top_widget)
+        top_layout.setContentsMargins(0, 5, 0, 0)  # Add top padding that will work in both modes
         top_layout.setSpacing(5)
         
         self.toggle_stt_button = QPushButton("STT Off")
@@ -119,7 +123,7 @@ class ChatWindow(QMainWindow):
         """)
         top_layout.addWidget(self.theme_toggle)
         
-        layout.addWidget(top_widget)
+        layout.addWidget(self.top_widget)
 
     def setup_chat_area(self, layout):
         self.chat_area = QWidget()
@@ -539,6 +543,34 @@ class ChatWindow(QMainWindow):
             logger.info("Notified backend of playback completion.")
         except Exception as e:
             logger.error(f"Error notifying playback complete: {e}")
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key.Key_Escape:
+            self.toggle_kiosk_mode()
+        super().keyPressEvent(event)
+
+    def toggle_kiosk_mode(self):
+        self.is_kiosk_mode = not self.is_kiosk_mode
+        
+        if self.is_kiosk_mode:
+            # Store current geometry before changing flags
+            self.normal_geometry = self.geometry()
+            # Remove title bar and frame
+            self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
+            # Adjust margins to use title bar space
+            self.centralWidget().layout().setContentsMargins(5, 0, 5, 5)
+        else:
+            # Restore normal window flags and geometry
+            self.setWindowFlags(self.normal_window_flags)
+            self.setGeometry(self.normal_geometry)
+            # Restore normal margins
+            self.centralWidget().layout().setContentsMargins(5, 5, 5, 5)
+        
+        # Show window again (required after changing flags)
+        self.show()
+        
+        # Ensure the chat area gets scrolled properly after toggling
+        QTimer.singleShot(100, self.auto_scroll_chat)
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
