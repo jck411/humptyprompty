@@ -17,37 +17,8 @@ class MessageBubble(QFrame):
         self.label.setWordWrap(True)
         self.label.setTextFormat(Qt.TextFormat.RichText)
         self.label.setOpenExternalLinks(True)
-        
-        if is_user:
-            self.setStyleSheet(f"""
-                QFrame#messageBubble {{
-                    background-color: {COLORS['user_bubble']};
-                    border-radius: 15px;
-                    margin: 5px 50px 5px 5px;
-                    padding: 5px;
-                }}
-                QLabel {{
-                    color: {COLORS['text_primary']};
-                    font-size: 14px;
-                    background-color: transparent;
-                }}
-            """)
-        else:
-            self.setStyleSheet(f"""
-                QFrame#messageBubble {{
-                    background-color: transparent;
-                    margin: 5px 5px 5px 50px;
-                    padding: 5px;
-                }}
-                QLabel {{
-                    color: {COLORS['text_primary']};
-                    font-size: 14px;
-                    background-color: transparent;
-                }}
-            """)
-        
         layout.addWidget(self.label)
-
+        
     def update_text(self, new_text):
         self.label.setText(new_text)
 

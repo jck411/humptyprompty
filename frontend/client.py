@@ -6,7 +6,7 @@ import requests
 import logging
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QPushButton, QScrollArea
+    QPushButton, QScrollArea, QSizePolicy
 )
 from PyQt6.QtCore import Qt, QTimer, QSize, QMutexLocker
 from PyQt6.QtGui import QColor, QPalette, QIcon
@@ -24,17 +24,22 @@ class ChatWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Modern Chat Interface")
-        self.setMinimumSize(800, 600)
-        self.is_dark_mode = False
+        self.setMinimumSize(800, 600)  # Keep minimum size for usability
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        
+        # Initialize dark mode and colors first
+        self.is_dark_mode = True
+        global COLORS
+        COLORS = DARK_COLORS
         
         # Buffer for in-progress assistant message
         self.assistant_text_in_progress = ""
         self.assistant_bubble_in_progress = None
 
-        # Initialize states
+        # Initialize states first
         self.init_states()
         
-        # Setup UI components
+        # Setup UI components after states are initialized
         self.setup_ui()
         
         # Setup WebSocket client
@@ -42,6 +47,12 @@ class ChatWindow(QMainWindow):
         
         # Setup audio
         self.setup_audio()
+        
+        # Apply initial styling
+        self.apply_styling()
+        
+        # Set initial theme toggle icon to reflect dark mode
+        self.theme_toggle.setIcon(QIcon("/home/jack/humptyprompty/frontend/icons/light_mode_24dp_E8EAED.svg"))
 
     def init_states(self):
         # Get initial TTS state from server
@@ -113,6 +124,7 @@ class ChatWindow(QMainWindow):
     def setup_chat_area(self, layout):
         self.chat_area = QWidget()
         self.chat_area.setAutoFillBackground(True)
+        self.chat_area.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         chat_palette = self.chat_area.palette()
         chat_palette.setColor(QPalette.ColorRole.Window, QColor(COLORS['background']))
         self.chat_area.setPalette(chat_palette)
@@ -123,6 +135,7 @@ class ChatWindow(QMainWindow):
         self.chat_layout.addStretch()
 
         scroll = QScrollArea()
+        scroll.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         scroll.setWidget(self.chat_area)
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -271,20 +284,14 @@ class ChatWindow(QMainWindow):
         icon_path = "/home/jack/humptyprompty/frontend/icons/light_mode_24dp_E8EAED.svg" if self.is_dark_mode else "/home/jack/humptyprompty/frontend/icons/dark_mode_24dp_E8EAED.svg"
         self.theme_toggle.setIcon(QIcon(icon_path))
         
-        # Update chat area and scroll area backgrounds
-        chat_palette = self.chat_area.palette()
-        chat_palette.setColor(QPalette.ColorRole.Window, QColor(COLORS['background']))
-        self.chat_area.setPalette(chat_palette)
+        # Update chat area background
+        self.chat_area.setStyleSheet(f"background-color: {COLORS['background']};")
         
+        # Update scroll area background
         scroll_area = self.findChild(QScrollArea)
-        scroll_palette = scroll_area.palette()
-        scroll_palette.setColor(QPalette.ColorRole.Window, QColor(COLORS['background']))
-        scroll_area.setPalette(scroll_palette)
+        scroll_area.setStyleSheet(f"background-color: {COLORS['background']};")
         
-        # Reapply styling with new colors
-        self.apply_styling()
-        
-        # Update existing message bubbles
+        # Reapply styling for all existing message bubbles
         for i in range(self.chat_layout.count()):
             widget = self.chat_layout.itemAt(i).widget()
             if isinstance(widget, MessageBubble):
@@ -306,7 +313,7 @@ class ChatWindow(QMainWindow):
                 else:
                     widget.setStyleSheet(f"""
                         QFrame#messageBubble {{
-                            background-color: transparent;
+                            background-color: {COLORS['background']};
                             margin: 5px 5px 5px 50px;
                             padding: 5px;
                         }}
@@ -316,6 +323,9 @@ class ChatWindow(QMainWindow):
                             background-color: transparent;
                         }}
                     """)
+        
+        # Reapply overall styling
+        self.apply_styling()
 
     def send_message(self):
         text = self.text_input.toPlainText().strip()
@@ -332,6 +342,18 @@ class ChatWindow(QMainWindow):
     def handle_message(self, token):
         if not self.assistant_bubble_in_progress:
             self.assistant_bubble_in_progress = MessageBubble("", is_user=False)
+            self.assistant_bubble_in_progress.setStyleSheet(f"""
+                QFrame#messageBubble {{
+                    background-color: {COLORS['background']};
+                    margin: 5px 5px 5px 50px;
+                    padding: 5px;
+                }}
+                QLabel {{
+                    color: {COLORS['text_primary']};
+                    font-size: 14px;
+                    background-color: transparent;
+                }}
+            """)
             self.chat_layout.insertWidget(self.chat_layout.count() - 1, self.assistant_bubble_in_progress)
         self.assistant_text_in_progress += token
         self.assistant_bubble_in_progress.update_text(self.assistant_text_in_progress)
@@ -356,6 +378,33 @@ class ChatWindow(QMainWindow):
 
     def add_message(self, text, is_user):
         bubble = MessageBubble(text, is_user)
+        if is_user:
+            bubble.setStyleSheet(f"""
+                QFrame#messageBubble {{
+                    background-color: {COLORS['user_bubble']};
+                    border-radius: 15px;
+                    margin: 5px 50px 5px 5px;
+                    padding: 5px;
+                }}
+                QLabel {{
+                    color: {COLORS['text_primary']};
+                    font-size: 14px;
+                    background-color: transparent;
+                }}
+            """)
+        else:
+            bubble.setStyleSheet(f"""
+                QFrame#messageBubble {{
+                    background-color: {COLORS['background']};
+                    margin: 5px 5px 5px 50px;
+                    padding: 5px;
+                }}
+                QLabel {{
+                    color: {COLORS['text_primary']};
+                    font-size: 14px;
+                    background-color: transparent;
+                }}
+            """)
         self.chat_layout.insertWidget(self.chat_layout.count() - 1, bubble)
         self.auto_scroll_chat()
 
