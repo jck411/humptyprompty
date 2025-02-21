@@ -2,6 +2,59 @@ import os
 import asyncio
 import azure.cognitiveservices.speech as speechsdk
 
+class AzureTTS:
+    def __init__(self):
+        self.speech_config = speechsdk.SpeechConfig(
+            subscription=os.getenv("AZURE_SPEECH_KEY"),
+            region=os.getenv("AZURE_SPEECH_REGION")
+        )
+        self.audio_format = speechsdk.SpeechSynthesisOutputFormat.Raw24Khz16BitMonoPcm
+        self.speech_config.set_speech_synthesis_output_format(self.audio_format)
+        
+    async def stream_to_audio(self, text):
+        audio_queue = asyncio.Queue()
+        stop_event = asyncio.Event()
+        
+        push_stream_callback = PushAudioOutputStreamCallback(audio_queue, stop_event)
+        push_stream = speechsdk.audio.PushAudioOutputStream(push_stream_callback)
+        audio_cfg = speechsdk.audio.AudioOutputConfig(stream=push_stream)
+        
+        synthesizer = speechsdk.SpeechSynthesizer(
+            speech_config=self.speech_config, 
+            audio_config=audio_cfg
+        )
+        
+        ssml = self._create_ssml(text)
+        result_future = synthesizer.speak_ssml_async(ssml)
+        
+        try:
+            await asyncio.get_event_loop().run_in_executor(None, result_future.get)
+            while True:
+                chunk = await audio_queue.get()
+                if chunk is None:
+                    break
+                yield chunk
+        except Exception:
+            stop_event.set()
+            yield None
+            
+    def _create_ssml(self, text):
+        voice = "en-US-KaiNeural"
+        prosody = {
+            "rate": "1.0",
+            "pitch": "0%",
+            "volume": "default"
+        }
+        return f"""
+<speak version='1.0' xml:lang='en-US'>
+    <voice name='{voice}'>
+        <prosody rate='{prosody["rate"]}' pitch='{prosody["pitch"]}' volume='{prosody["volume"]}'>
+            {text}
+        </prosody>
+    </voice>
+</speak>
+"""
+
 class PushAudioOutputStreamCallback(speechsdk.audio.PushAudioOutputStreamCallback):
     def __init__(self, audio_queue: asyncio.Queue, stop_event: asyncio.Event):
         super().__init__()

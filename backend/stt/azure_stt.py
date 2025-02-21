@@ -9,7 +9,7 @@ from backend.config.config import CONFIG
 connected_websockets: Set[WebSocket] = set()
 
 # For convenience, extract backend STT settings
-BACKEND_STT_SETTINGS: Dict[str, Any] = CONFIG["STT_SETTINGS"]["BACKEND_STT"]
+BACKEND_STT_SETTINGS: Dict[str, Any] = CONFIG["STT_MODELS"]["AZURE_STT"]
 
 class ContinuousSpeechRecognizer:
     def __init__(self):

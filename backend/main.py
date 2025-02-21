@@ -70,9 +70,9 @@ async def unified_chat_websocket(websocket: WebSocket):
     await websocket.accept()
     connected_websockets.add(websocket)
 
-    # Only start STT streaming if backend STT is enabled
+    # Only start STT streaming if Azure STT is the selected provider
     stt_task = None
-    if CONFIG["STT_SETTINGS"]["LOCATION"] == "backend":
+    if CONFIG["STT_MODELS"]["PROVIDER"] == "azure":
         stt_task = asyncio.create_task(stream_stt_to_client(websocket))
 
     try:
@@ -107,7 +107,7 @@ async def unified_chat_websocket(websocket: WebSocket):
                 ))
 
                 audio_forward_task = None
-                if CONFIG["AUDIO_PLAYBACK_CONFIG"]["FRONTEND_PLAYBACK"]:
+                if CONFIG["GENERAL_AUDIO"]["TTS_PLAYBACK_LOCATION"] == "frontend":
                     audio_forward_task = asyncio.create_task(forward_audio_to_websocket(
                         audio_queue, websocket, TTS_STOP_EVENT
                     ))

@@ -6,6 +6,24 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+def setup_chat_client():
+    api_host = CONFIG["API_SETTINGS"]["API_HOST"].lower()
+    if api_host == "openai":
+        client = openai.AsyncOpenAI(
+            api_key=os.getenv("OPENAI_API_KEY"),
+            base_url=CONFIG["API_SERVICES"]["openai"]["BASE_URL"]
+        )
+        deployment_name = CONFIG["API_SERVICES"]["openai"]["MODEL"]
+    elif api_host == "openrouter":
+        client = openai.AsyncOpenAI(
+            api_key=os.getenv("OPENROUTER_API_KEY"),
+            base_url=CONFIG["API_SERVICES"]["openrouter"]["BASE_URL"]
+        )
+        deployment_name = CONFIG["API_SERVICES"]["openrouter"]["MODEL"]
+    else:
+        raise ValueError(f"Unsupported API_HOST: {api_host}")
+    return client, deployment_name
+
 CONFIG: Dict[str, Any] = {
     "API_SETTINGS": {
         "API_HOST": "openai"
@@ -20,16 +38,20 @@ CONFIG: Dict[str, Any] = {
             "MODEL": "meta-llama/llama-3.1-70b-instruct"
         },
     },
-    "GENERAL_TTS": {
-        "TTS_PROVIDER": "azure",
-        "TTS_ENABLED": False
+    "GENERAL_AUDIO": {
+        "TTS_ENABLED": True,
+        "TTS_PLAYBACK_LOCATION": "backend",  # "frontend" or "backend"
+        "STT_ENABLED": False,
+        "STT_PROVIDER_LOCATION": "backend",  # "frontend" or "backend" if frontend selected then backend STT is disabled
+        
     },
     "PROCESSING_PIPELINE": {
         "USE_SEGMENTATION": True,
         "DELIMITERS": ["\n", ". ", "? ", "! ", "* "],
-        "CHARACTER_MAXIMUM": 50, # will only segment for the initial characters listed here, the rest will just stream
+        "CHARACTER_MAXIMUM": 50,  # will only segment for the initial characters listed here, the rest will just stream
     },
     "TTS_MODELS": {
+        "PROVIDER": "azure",  # default provider
         "OPENAI_TTS": {
             "TTS_CHUNK_SIZE": 1024,
             "TTS_SPEED": 1.0,
@@ -65,36 +87,33 @@ CONFIG: Dict[str, Any] = {
             }
         }
     },
-    "AUDIO_PLAYBACK_CONFIG": {
+    "AUDIO_SETTINGS": {
         "FORMAT": 16,
         "CHANNELS": 1,
         "RATE": 24000,
-        "FRONTEND_PLAYBACK": True
     },
-    "LOGGING": {
-        "PRINT_SEGMENTS": True,
-        "PRINT_TOOL_CALLS": False,
-         "PRINT_FUNCTION_CALLS": False
-
-    },
-    "STT_SETTINGS": {
-        "LOCATION": "backend",  # Use "backend" for Azure STT or "frontend" for browser-based STT
-        "BACKEND_STT": {
-            "PROVIDER": "azure",
+    "STT_MODELS": {
+        "PROVIDER": "azure",  # default provider
+        "AZURE_STT": {
             "LANGUAGE": "en-US",
             "CONTINUOUS_RECOGNITION": True,
             "PROFANITY_OPTION": "raw",
             "AUTO_PUNCTUATION": True,
-            "INTERIM_RESULTS": False
+            "INTERIM_RESULTS": False,
         },
-        "FRONTEND_STT": {
-            "PROVIDER": "browser",
+        "OPENAI_STT": {
             "LANGUAGE": "en-US",
-            "CONTINUOUS_RECOGNITION": True,
-            "INTERIM_RESULTS": True,
-            "MAX_ALTERNATIVES": 1,
-            "AUTO_START": False
+            "MODEL": "whisper-1",
+            "CHUNK_SIZE": 1024,
+            "AUDIO_FORMAT": "pcm",
+            # Additional OpenAI-specific settings can be added here
         }
+        # Future providers can be added here following the same pattern
+    },
+    "LOGGING": {
+        "PRINT_SEGMENTS": True,
+        "PRINT_TOOL_CALLS": False,
+        "PRINT_FUNCTION_CALLS": False
     }
 }
 

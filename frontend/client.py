@@ -244,6 +244,8 @@ class ChatWindow(QMainWindow):
         self.is_toggling_tts = False
         self.stt_enabled = False
         self.is_toggling_stt = False
+        self.playback_location = "backend"  # Initial state matching config.py
+        self.is_toggling_playback = False
 
         # Flag to ensure we only notify playback complete once per TTS stream.
         self.playback_complete_notified = False
@@ -267,8 +269,12 @@ class ChatWindow(QMainWindow):
         self.toggle_tts_button = QPushButton("TTS On" if self.tts_enabled else "TTS Off")
         self.toggle_tts_button.setFixedSize(120, 40)  # Reduced height
 
+        self.toggle_playback_button = QPushButton("BACK PLAY")
+        self.toggle_playback_button.setFixedSize(120, 40)  # Reduced height
+
         top_layout.addWidget(self.toggle_stt_button)
         top_layout.addWidget(self.toggle_tts_button)
+        top_layout.addWidget(self.toggle_playback_button)
         top_layout.addStretch()
         
         # Chat area with stretch
@@ -336,6 +342,7 @@ class ChatWindow(QMainWindow):
         self.text_input.textChanged.connect(self.adjust_text_input_height)
         self.toggle_stt_button.clicked.connect(self.toggle_stt)
         self.toggle_tts_button.clicked.connect(self.toggle_tts)
+        self.toggle_playback_button.clicked.connect(self.toggle_playback_location)
         self.stop_all_button.clicked.connect(self.stop_tts_and_generation)
         
         # ===================== Setup QAudio for PCM playback =====================
@@ -400,11 +407,10 @@ class ChatWindow(QMainWindow):
             }}
             QPushButton:hover {{
                 background-color: {COLORS['button_hover']};
-                transform: scale(1.0);
             }}
             QPushButton:pressed {{
                 background-color: {COLORS['button_pressed']};
-                transform: scale(0.95);
+                margin: 2px;
             }}
             QLabel {{
                 color: {COLORS['text_primary']};
@@ -516,6 +522,22 @@ class ChatWindow(QMainWindow):
             logger.error(f"Error toggling TTS: {e}")
         finally:
             self.is_toggling_tts = False
+
+    def toggle_playback_location(self):
+        if self.is_toggling_playback:
+            return
+        
+        self.is_toggling_playback = True
+        try:
+            resp = requests.post(f"{HTTP_BASE_URL}/api/toggle-playback-location")
+            resp.raise_for_status()
+            data = resp.json()
+            self.playback_location = data.get("playback_location", self.playback_location)
+            self.toggle_playback_button.setText("FRONT PLAY" if self.playback_location == "frontend" else "BACK PLAY")
+        except requests.RequestException as e:
+            logger.error(f"Error toggling playback location: {e}")
+        finally:
+            self.is_toggling_playback = False
 
     def stop_tts_and_generation(self):
         try:

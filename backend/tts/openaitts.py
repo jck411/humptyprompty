@@ -3,6 +3,33 @@ import asyncio
 import openai
 from typing import Optional
 
+class OpenAITTS:
+    def __init__(self):
+        self.client = openai.AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        self.model = "tts-1"
+        self.voice = "alloy"
+        self.speed = 1.0
+        self.response_format = "pcm"
+        self.chunk_size = 1024
+
+    async def stream_to_audio(self, text):
+        if not text.strip():
+            return
+        
+        try:
+            async with self.client.audio.speech.with_streaming_response.create(
+                model=self.model,
+                voice=self.voice,
+                input=text.strip(),
+                speed=self.speed,
+                response_format=self.response_format
+            ) as response:
+                async for audio_chunk in response.iter_bytes(self.chunk_size):
+                    yield audio_chunk
+                yield b'\x00' * self.chunk_size
+        except Exception:
+            yield None
+
 async def openai_text_to_speech_processor(phrase_queue: asyncio.Queue,
                                           audio_queue: asyncio.Queue,
                                           stop_event: asyncio.Event,
