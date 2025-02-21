@@ -40,7 +40,7 @@ CONFIG: Dict[str, Any] = {
     },
     "GENERAL_AUDIO": {
         "TTS_ENABLED": True,
-        "TTS_PLAYBACK_LOCATION": "backend",  # "frontend" or "backend"
+        "TTS_PLAYBACK_LOCATION": "frontend",  # "frontend" or "backend"
         "STT_ENABLED": False,
         "STT_PROVIDER_LOCATION": "backend",  # "frontend" or "backend" if frontend selected then backend STT is disabled
         
