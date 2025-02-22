@@ -53,7 +53,7 @@ COLORS = DARK_COLORS
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 ch = logging.StreamHandler()
-formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(name%s: %(message)s")
+formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 ch.setFormatter(formatter)
 logger.addHandler(ch)
 
@@ -78,7 +78,6 @@ class CustomTextEdit(QTextEdit):
     def keyPressEvent(self, event):
         # Send message on Enter (without Shift)
         if event.key() == Qt.Key.Key_Return and not (event.modifiers() & Qt.KeyboardModifier.ShiftModifier):
-            # Use self.window() to get the top-level window (ChatWindow)
             main_window = self.window()
             if hasattr(main_window, "send_message"):
                 main_window.send_message()
@@ -110,7 +109,6 @@ class WebSocketClient(QThread):
             self.ws = await websockets.connect(ws_url)
             self.connection_status.emit(True)
             logger.info(f"Frontend: WebSocket connected to {ws_url}")
-
             while self.running:
                 try:
                     message = await self.ws.recv()
@@ -118,7 +116,7 @@ class WebSocketClient(QThread):
                         if message.startswith(b'audio:'):
                             audio_data = message[len(b'audio:'):]
                             logger.info(f"Frontend: Received audio chunk of size: {len(audio_data)} bytes")
-                            self.audio_received.emit(message)  # Send full message including prefix
+                            self.audio_received.emit(message)
                         else:
                             logger.warning(f"Frontend: Received binary message without audio prefix, size: {len(message)} bytes")
                             self.audio_received.emit(b'audio:' + message)
@@ -142,20 +140,14 @@ class WebSocketClient(QThread):
 
     async def send_message(self, message):
         if self.ws:
-            self.messages.append({
-                "sender": "user",
-                "text": message
-            })
+            self.messages.append({"sender": "user", "text": message})
             await self.ws.send(json.dumps({
                 "action": "chat",
                 "messages": self.messages
             }))
 
     def handle_assistant_message(self, message):
-        self.messages.append({
-            "sender": "assistant",
-            "text": message
-        })
+        self.messages.append({"sender": "assistant", "text": message})
 
     def run(self):
         asyncio.run(self.connect())
@@ -174,9 +166,8 @@ class QueueAudioDevice(QIODevice):
             if not self.audio_buffer:
                 if self.end_of_stream:
                     logger.info("Buffer empty and end-of-stream marked")
-                    return bytes()  # This triggers IdleState
-                return bytes(maxSize)  # Return silence when buffer empty
-            
+                    return bytes()
+                return bytes(maxSize)
             data = bytes(self.audio_buffer[:maxSize])
             self.audio_buffer = self.audio_buffer[maxSize:]
             return data
@@ -197,7 +188,6 @@ class QueueAudioDevice(QIODevice):
         with QMutexLocker(self.mutex):
             logger.info("Marking end of stream, current buffer size: %d", len(self.audio_buffer))
             self.end_of_stream = True
-            # If buffer is already empty, make sure we trigger the idle state
             if len(self.audio_buffer) == 0:
                 self.last_read_empty = True
                 logger.info("Buffer already empty at end of stream mark")
@@ -214,17 +204,14 @@ def setup_audio():
     audio_format.setSampleRate(24000)
     audio_format.setChannelCount(1)
     audio_format.setSampleFormat(QAudioFormat.SampleFormat.Int16)
-
     device = QMediaDevices.defaultAudioOutput()
     if device is None:
         logger.error("Error: No audio output device found!")
     audio_sink = QAudioSink(device, audio_format)
     audio_sink.setVolume(1.0)
-
     audio_device = QueueAudioDevice()
     audio_device.open(QIODevice.OpenModeFlag.ReadOnly)
     audio_sink.start(audio_device)
-
     return audio_sink, audio_device
 
 # ----------------------- MAIN CHAT WINDOW -----------------------
@@ -248,6 +235,10 @@ class ChatWindow(QMainWindow):
         self.assistant_text_in_progress = ""
         self.assistant_bubble_in_progress = None
 
+        # Default playback location is backend.
+        # Button text will show the toggle target (i.e. "FRONT PLAY" when currently backend).
+        self.playback_location = "backend"
+        
         self.init_states()
         self.setup_ui()
         self.setup_websocket()
@@ -294,8 +285,13 @@ class ChatWindow(QMainWindow):
 
         top_layout.addWidget(self.toggle_stt_button)
         top_layout.addWidget(self.toggle_tts_button)
-        top_layout.addStretch()
-
+        
+        # Single toggle button for switching playback location
+        # When current playback is backend, the button shows "FRONT PLAY" (i.e. switch to front)
+        self.toggle_playback_button = QPushButton("FRONT PLAY")
+        self.toggle_playback_button.setFixedSize(120, 40)
+        top_layout.addWidget(self.toggle_playback_button)
+        
         # Theme toggle button
         self.theme_toggle = QPushButton()
         self.theme_toggle.setFixedSize(45, 45)
@@ -315,6 +311,11 @@ class ChatWindow(QMainWindow):
         top_layout.addWidget(self.theme_toggle)
         
         layout.addWidget(self.top_widget)
+        
+        # Connect button actions
+        self.toggle_stt_button.clicked.connect(self.toggle_stt)
+        self.toggle_tts_button.clicked.connect(self.toggle_tts)
+        self.toggle_playback_button.clicked.connect(self.toggle_playback)
 
     def setup_chat_area(self, layout):
         self.chat_area = QWidget()
@@ -379,8 +380,6 @@ class ChatWindow(QMainWindow):
 
         send_button.clicked.connect(self.send_message)
         self.text_input.textChanged.connect(self.adjust_text_input_height)
-        self.toggle_stt_button.clicked.connect(self.toggle_stt)
-        self.toggle_tts_button.clicked.connect(self.toggle_tts)
         self.stop_all_button.clicked.connect(self.stop_tts_and_generation)
 
     def setup_websocket(self):
@@ -399,17 +398,14 @@ class ChatWindow(QMainWindow):
 
     def setup_audio(self):
         self.audio_sink, self.audio_device = setup_audio()
-        # Connect the stateChanged signal to a handler
         self.audio_sink.stateChanged.connect(self.handle_audio_state_changed)
         self.audio_queue = asyncio.Queue()
         self.audio_timer = QTimer()
         self.audio_timer.setInterval(10)
         self.audio_timer.timeout.connect(self.feed_audio_data)
         self.audio_timer.start()
-        
-        # Add heartbeat timer for monitoring audio device state
         self.state_monitor_timer = QTimer()
-        self.state_monitor_timer.setInterval(100)  # Check every 100ms
+        self.state_monitor_timer.setInterval(100)
         self.state_monitor_timer.timeout.connect(self.check_audio_state)
         self.state_monitor_timer.start()
         logger.info("Audio setup completed with state monitoring")
@@ -426,19 +422,16 @@ class ChatWindow(QMainWindow):
     def handle_audio_state_changed(self, state):
         logger.info(f"Audio state changed to: {state}")
         if state == QAudio.State.IdleState and self.ws_client and self.ws_client.ws:
-            # Check if we actually transitioned from ActiveState
             with QMutexLocker(self.audio_device.mutex):
                 buffer_size = len(self.audio_device.audio_buffer)
                 is_end_of_stream = self.audio_device.end_of_stream
                 logger.info(f"State change to Idle - Buffer size: {buffer_size}, End of stream: {is_end_of_stream}")
-                
                 if buffer_size == 0 and is_end_of_stream:
                     logger.info("Audio playback finished, sending playback-complete message to server...")
                     asyncio.run(self.ws_client.ws.send(json.dumps({
                         "action": "playback-complete"
                     })))
                     logger.info("Playback-complete message sent to server")
-                    # Reset end_of_stream flag for next playback
                     self.audio_device.end_of_stream = False
                     self.audio_device.last_read_empty = False
 
@@ -506,10 +499,8 @@ class ChatWindow(QMainWindow):
         self.is_dark_mode = not self.is_dark_mode
         global COLORS
         COLORS = DARK_COLORS if self.is_dark_mode else LIGHT_COLORS
-        
         icon_path = "/home/jack/humptyprompty/frontend/icons/light_mode_24dp_E8EAED.svg" if self.is_dark_mode else "/home/jack/humptyprompty/frontend/icons/dark_mode_24dp_E8EAED.svg"
         self.theme_toggle.setIcon(QIcon(icon_path))
-        
         self.chat_area.setStyleSheet(f"background-color: {COLORS['background']};")
         scroll_area = self.findChild(QScrollArea)
         scroll_area.setStyleSheet(f"background-color: {COLORS['background']};")
@@ -680,7 +671,6 @@ class ChatWindow(QMainWindow):
         try:
             requests.post(f"{HTTP_BASE_URL}/api/stop-tts").raise_for_status()
             requests.post(f"{HTTP_BASE_URL}/api/stop-generation").raise_for_status()
-            # Clear any pending audio and mark end of stream
             with QMutexLocker(self.audio_device.mutex):
                 self.audio_device.clear_buffer()
                 self.audio_device.mark_end_of_stream()
@@ -696,12 +686,11 @@ class ChatWindow(QMainWindow):
 
     def on_audio_received(self, pcm_data: bytes):
         logger.info(f"Frontend: Processing audio chunk of size: {len(pcm_data)} bytes")
-        if pcm_data == b'audio:' or len(pcm_data) == 0:  # Empty audio message
+        if pcm_data == b'audio:' or len(pcm_data) == 0:
             logger.info("Frontend: Received empty audio message, marking end of stream")
             self.audio_queue.put_nowait(None)
-            self.audio_device.mark_end_of_stream()  # Mark end of stream immediately
+            self.audio_device.mark_end_of_stream()
         else:
-            # Handle audio: prefix if present
             prefix = b'audio:'
             if pcm_data.startswith(prefix):
                 pcm_data = pcm_data[len(prefix):]
@@ -713,7 +702,6 @@ class ChatWindow(QMainWindow):
             logger.warning(f"Warning: Audio sink not active! Current state: {current_state}")
             self.audio_sink.start(self.audio_device)
             return
-
         try:
             while True:
                 try:
@@ -725,12 +713,10 @@ class ChatWindow(QMainWindow):
                             logger.info("Buffer empty at end-of-stream, stopping audio sink")
                             self.audio_sink.stop()
                         break
-
                     bytes_written = self.audio_device.writeData(pcm_chunk)
                     logger.debug(f"Wrote {bytes_written} bytes to audio device")
                 except asyncio.QueueEmpty:
                     break
-                
         except Exception as e:
             logger.error(f"Error in feed_audio_data: {e}")
             logger.exception("Stack trace:")
@@ -752,6 +738,25 @@ class ChatWindow(QMainWindow):
             self.centralWidget().layout().setContentsMargins(5, 5, 5, 5)
         self.show()
         QTimer.singleShot(100, self.auto_scroll_chat)
+
+    # --- Toggle playback method ---
+    def toggle_playback(self):
+        try:
+            resp = requests.post(f"{HTTP_BASE_URL}/api/toggle-playback-location")
+            resp.raise_for_status()
+            new_state = resp.json().get("playback_location", None)
+            if new_state:
+                self.playback_location = new_state
+                # If current location is backend, then the toggle button should offer "FRONT PLAY"
+                if self.playback_location == "backend":
+                    self.toggle_playback_button.setText("FRONT PLAY")
+                else:
+                    self.toggle_playback_button.setText("BACK PLAY")
+                logger.info(f"Playback location toggled to {self.playback_location}")
+            else:
+                logger.error("No playback_location returned from toggle endpoint")
+        except Exception as e:
+            logger.error(f"Error toggling playback location: {e}")
 
 # ----------------------- MAIN -----------------------
 if __name__ == '__main__':
