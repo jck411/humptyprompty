@@ -1,8 +1,5 @@
 import os
-from queue import Queue
 import azure.cognitiveservices.speech as speechsdk
-from typing import Any, Dict, Optional
-
 from backend.config.config import CONFIG
 from backend.stt.base import BaseSTTProvider, STTState
 from backend.stt.config import STTConfig
@@ -11,7 +8,6 @@ class AzureSTTProvider(BaseSTTProvider):
     def __init__(self, config: STTConfig):
         super().__init__()
         self.config = config
-        self.speech_queue = Queue()
         self.speech_key = os.getenv("AZURE_SPEECH_KEY")
         self.speech_region = os.getenv("AZURE_SPEECH_REGION")
         if self.config.enabled:
@@ -90,52 +86,26 @@ class AzureSTTProvider(BaseSTTProvider):
                 self.config.settings.get("INTERIM_RESULTS", False)):
                 self.speech_queue.put(f"(interim) {evt.result.text}")
 
-    async def start_listening(self):
-        if self._state not in [STTState.IDLE, STTState.READY, STTState.PAUSED]:
-            return
+    def _start_listening_impl(self) -> None:
         try:
             self.speech_recognizer.start_continuous_recognition()
-            self._state = STTState.LISTENING
         except Exception as e:
             print(f"Azure STT: Error starting recognition: {e}")
             self._state = STTState.ERROR
 
-    async def stop_listening(self):
-        if self._state != STTState.LISTENING:
-            return
+    def _stop_listening_impl(self) -> None:
         try:
             self.speech_recognizer.stop_continuous_recognition()
-            self._state = STTState.IDLE
         except Exception as e:
             print(f"Azure STT: Error stopping recognition: {e}")
             self._state = STTState.ERROR
 
-    def pause_listening(self) -> None:
-        if self._state == STTState.LISTENING:
-            try:
-                self.speech_recognizer.stop_continuous_recognition()
-                self._state = STTState.PAUSED
-                # Clear queue
-                while not self.speech_queue.empty():
-                    self.speech_queue.get_nowait()
-            except Exception as e:
-                print(f"Azure STT: Error during pause: {e}")
-                self._state = STTState.ERROR
-
-    def get_speech_nowait(self) -> Optional[str]:
+    def _pause_listening_impl(self) -> None:
         try:
-            return self.speech_queue.get_nowait()
-        except Exception:
-            return None
-
-    @property
-    def is_listening(self) -> bool:
-        # Remove _is_listening flag, use state instead
-        return self._state == STTState.LISTENING and self.config.enabled
-
-    @property
-    def state(self) -> STTState:
-        return self._state
+            self.speech_recognizer.stop_continuous_recognition()
+        except Exception as e:
+            print(f"Azure STT: Error during pause: {e}")
+            self._state = STTState.ERROR
 
 # Create configuration from global config
 stt_config = STTConfig(
