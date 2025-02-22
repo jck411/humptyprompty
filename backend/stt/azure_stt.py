@@ -1,99 +1,165 @@
 import os
 from queue import Queue
 import azure.cognitiveservices.speech as speechsdk
-from fastapi import WebSocket
-from typing import Set, Any, Dict
+from typing import Any, Dict, Optional
+
 from backend.config.config import CONFIG
+from backend.stt.base import BaseSTTProvider, STTState
+from backend.stt.config import STTConfig
 
-# Global WebSocket connections set
-connected_websockets: Set[WebSocket] = set()
-
-# For convenience, extract backend STT settings
-BACKEND_STT_SETTINGS: Dict[str, Any] = CONFIG["STT_MODELS"]["AZURE_STT"]
-
-class ContinuousSpeechRecognizer:
-    def __init__(self):
+class AzureSTTProvider(BaseSTTProvider):
+    def __init__(self, config: STTConfig):
+        print("\nAzure STT: Initializing provider...")
         self.speech_key = os.getenv('AZURE_SPEECH_KEY')
         self.speech_region = os.getenv('AZURE_SPEECH_REGION')
-        self.is_listening = False
-        self.speech_queue = Queue()
-        self.setup_recognizer()
-
-    def setup_recognizer(self):
+        
         if not self.speech_key or not self.speech_region:
+            print("Azure STT: WARNING - Missing credentials:")
+            print(f"  - AZURE_SPEECH_KEY: {'Set' if self.speech_key else 'Missing'}")
+            print(f"  - AZURE_SPEECH_REGION: {'Set' if self.speech_region else 'Missing'}")
+        else:
+            print("Azure STT: Credentials found")
+            
+        self._is_listening = False
+        self._state = STTState.INITIALIZING
+        self.speech_queue = Queue()
+        self.config = config
+        
+        print(f"Azure STT: Initial config - Enabled: {self.config.enabled}")
+        if self.config.enabled:
+            self.setup_recognizer()
+            self._state = STTState.READY
+        else:
+            self._state = STTState.PAUSED
+            print("Azure STT: Started in paused state (STT disabled in config)")
+
+    def setup_recognizer(self) -> None:
+        print("\nAzure STT: Setting up recognizer...")
+        if not self.speech_key or not self.speech_region:
+            self._state = STTState.ERROR
+            print("Azure STT: Missing credentials - speech key or region not set")
             raise ValueError("Azure Speech Key or Region is not set.")
 
-        # Create the SpeechConfig using subscription key and region.
-        speech_config = speechsdk.SpeechConfig(
-            subscription=self.speech_key,
-            region=self.speech_region
-        )
-        # Configure language
-        speech_config.speech_recognition_language = BACKEND_STT_SETTINGS.get("LANGUAGE", "en-US")
+        try:
+            # Create the SpeechConfig using subscription key and region
+            speech_config = speechsdk.SpeechConfig(
+                subscription=self.speech_key,
+                region=self.speech_region
+            )
+            print("Azure STT: Created speech config")
+            
+            # Configure language
+            speech_config.speech_recognition_language = self.config.settings.get("LANGUAGE", "en-US")
 
-        # Configure auto punctuation using set_property_by_name
-        if BACKEND_STT_SETTINGS.get("AUTO_PUNCTUATION", False):
-            speech_config.set_property_by_name("SpeechServiceResponse_AutoPunctuation", "true")
+            # Configure auto punctuation
+            if self.config.settings.get("AUTO_PUNCTUATION", False):
+                speech_config.set_property_by_name("SpeechServiceResponse_AutoPunctuation", "true")
 
-        # Configure profanity filtering
-        profanity_option = BACKEND_STT_SETTINGS.get("PROFANITY_OPTION", "raw").lower()
-        if profanity_option == "raw":
-            speech_config.set_profanity(speechsdk.ProfanityOption.Raw)
-        elif profanity_option == "masked":
-            speech_config.set_profanity(speechsdk.ProfanityOption.Masked)
-        elif profanity_option == "removed":
-            speech_config.set_profanity(speechsdk.ProfanityOption.Removed)
+            # Configure profanity filtering
+            profanity_option = self.config.settings.get("PROFANITY_OPTION", "raw").lower()
+            if profanity_option == "raw":
+                speech_config.set_profanity(speechsdk.ProfanityOption.Raw)
+            elif profanity_option == "masked":
+                speech_config.set_profanity(speechsdk.ProfanityOption.Masked)
+            elif profanity_option == "removed":
+                speech_config.set_profanity(speechsdk.ProfanityOption.Removed)
 
-        # Create audio config from the default microphone
-        audio_config = speechsdk.audio.AudioConfig(use_default_microphone=True)
-        self.speech_recognizer = speechsdk.SpeechRecognizer(
-            speech_config=speech_config,
-            audio_config=audio_config
-        )
+            # Create audio config from the default microphone
+            audio_config = speechsdk.audio.AudioConfig(use_default_microphone=True)
+            self.speech_recognizer = speechsdk.SpeechRecognizer(
+                speech_config=speech_config,
+                audio_config=audio_config
+            )
 
-        # Connect events
-        self.speech_recognizer.recognized.connect(self.handle_final_result)
-        if BACKEND_STT_SETTINGS.get("INTERIM_RESULTS", False):
+            # Connect events
+            self.speech_recognizer.recognized.connect(self.handle_final_result)
             self.speech_recognizer.recognizing.connect(self.handle_interim_result)
+            self.speech_recognizer.session_started.connect(
+                lambda evt: print(f"\nAzure STT: Session started (SessionId: {evt.session_id})")
+            )
+            self.speech_recognizer.session_stopped.connect(
+                lambda evt: print(f"\nAzure STT: Session stopped (SessionId: {evt.session_id})")
+            )
+            self.speech_recognizer.canceled.connect(
+                lambda evt: print(f"\nAzure STT: Canceled - Reason: {evt.cancellation_details.reason}, Details: {evt.cancellation_details.error_details}")
+            )
 
-    def handle_final_result(self, evt):
-        if evt.result.text and self.is_listening:
-            self.speech_queue.put(evt.result.text)
+            self._state = STTState.READY
+            print("Azure STT: Setup complete - State: READY")
+        except Exception as e:
+            self._state = STTState.ERROR
+            raise ValueError(f"Failed to setup Azure recognizer: {str(e)}")
 
-    def handle_interim_result(self, evt):
-        if evt.result.text and self.is_listening and BACKEND_STT_SETTINGS.get("INTERIM_RESULTS", False):
-            self.speech_queue.put(f"(interim) {evt.result.text}")
+    def handle_final_result(self, evt) -> None:
+        if evt.result.text:
+            print(f"\nAzure STT [Final]: {evt.result.text}")
+            if self._is_listening and self.config.enabled:
+                self.speech_queue.put(evt.result.text)
 
-    def start_listening(self):
-        if not self.is_listening:
-            self.is_listening = True
+    def handle_interim_result(self, evt) -> None:
+        if evt.result.text:
+            print(f"\rAzure STT [Interim]: {evt.result.text}", end="", flush=True)
+            if (self._is_listening and self.config.enabled and 
+                self.config.settings.get("INTERIM_RESULTS", False)):
+                self.speech_queue.put(f"(interim) {evt.result.text}")
+
+    def start_listening(self) -> None:
+        print(f"\nAzure STT: Start listening requested - Current state: {self._state}, Enabled: {self.config.enabled}")
+        if not self.config.enabled:
+            print("Azure STT: Cannot start - STT is globally disabled")
+            return
+            
+        if self._state == STTState.PAUSED:
+            print("Azure STT: Reinitializing recognizer from paused state...")
+            self.setup_recognizer()
+            self._state = STTState.READY
+            
+        if not self._is_listening and self._state == STTState.READY:
+            print("Azure STT: Starting continuous recognition...")
+            self._is_listening = True
+            self._state = STTState.LISTENING
             self.speech_recognizer.start_continuous_recognition()
-            print("Azure STT: Started listening.")
+            print("Azure STT: Started listening")
+        else:
+            print(f"Azure STT: Cannot start listening - Current state: {self._state}, Is listening: {self._is_listening}")
 
-    def pause_listening(self):
-        if self.is_listening:
-            self.is_listening = False
-            self.speech_recognizer.stop_continuous_recognition()
-            print("Azure STT: Paused listening.")
+    def pause_listening(self) -> None:
+        print(f"\nAzure STT: Pause listening requested - Current state: {self._state}, Is listening: {self._is_listening}")
+        if self._is_listening:
+            print("Azure STT: Stopping continuous recognition...")
+            self._is_listening = False
+            self._state = STTState.PAUSED
+            try:
+                self.speech_recognizer.stop_continuous_recognition()
+                # Clear any pending items in the queue
+                while not self.speech_queue.empty():
+                    self.speech_queue.get_nowait()
+            except Exception as e:
+                print(f"Azure STT: Error during pause: {e}")
+            print("Azure STT: Paused listening")
+        else:
+            print("Azure STT: Already paused")
 
-    def get_speech_nowait(self):
+    def get_speech_nowait(self) -> Optional[str]:
         try:
             return self.speech_queue.get_nowait()
         except Exception:
             return None
 
-# Create a single instance for your application
-stt_instance = ContinuousSpeechRecognizer()
+    @property
+    def is_listening(self) -> bool:
+        return self._is_listening and self.config.enabled
 
-async def broadcast_stt_state():
-    """Broadcasts the current STT state to all connected WebSocket clients"""
-    message = {"is_listening": stt_instance.is_listening}
-    failed_ws = set()
-    
-    for websocket in connected_websockets:
-        try:
-            await websocket.send_json(message)
-        except Exception:
-            failed_ws.add(websocket)
-            
-    connected_websockets.difference_update(failed_ws)
+    @property
+    def state(self) -> STTState:
+        return self._state
+
+# Create configuration from global config
+stt_config = STTConfig(
+    provider="azure",
+    settings=CONFIG["STT_MODELS"]["AZURE_STT"],
+    enabled=CONFIG["GENERAL_AUDIO"]["STT_ENABLED"]
+)
+
+# Create a single instance for your application
+stt_instance = AzureSTTProvider(stt_config)

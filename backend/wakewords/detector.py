@@ -5,6 +5,7 @@ import requests
 import pvporcupine
 import pyaudio
 from dotenv import load_dotenv
+from backend.config.config import CONFIG
 
 def get_keyword_file_paths() -> tuple[str, str]:
     """
@@ -81,8 +82,12 @@ def listen_for_wake_words() -> None:
 
 def start_wake_word_thread() -> None:
     """
-    Starts the wake word detection logic in a daemon thread.
+    Starts the wake word detection logic in a daemon thread if enabled in configuration.
     """
+    if not CONFIG["GENERAL_AUDIO"]["WAKEWORD_ENABLED"]:
+        print("[WakeWord] Wake word detection disabled in configuration.")
+        return
+
     thread = threading.Thread(target=listen_for_wake_words, daemon=True)
     thread.start()
     print("[WakeWord] Wake word detection thread started.")

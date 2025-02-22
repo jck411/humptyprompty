@@ -41,9 +41,9 @@ CONFIG: Dict[str, Any] = {
     "GENERAL_AUDIO": {
         "TTS_ENABLED": True,
         "TTS_PLAYBACK_LOCATION": "frontend",  # "frontend" or "backend"
-        "STT_ENABLED": False,
+        "STT_ENABLED": True,
         "STT_PROVIDER_LOCATION": "backend",  # "frontend" or "backend" if frontend selected then backend STT is disabled
-        
+        "WAKEWORD_ENABLED": False,  # Enable/disable wake word detection
     },
     "PROCESSING_PIPELINE": {
         "USE_SEGMENTATION": True,
