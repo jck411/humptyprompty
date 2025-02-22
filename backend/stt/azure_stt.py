@@ -9,29 +9,16 @@ from backend.stt.config import STTConfig
 
 class AzureSTTProvider(BaseSTTProvider):
     def __init__(self, config: STTConfig):
-        print("\nAzure STT: Initializing provider...")
-        self.speech_key = os.getenv('AZURE_SPEECH_KEY')
-        self.speech_region = os.getenv('AZURE_SPEECH_REGION')
-        
-        if not self.speech_key or not self.speech_region:
-            print("Azure STT: WARNING - Missing credentials:")
-            print(f"  - AZURE_SPEECH_KEY: {'Set' if self.speech_key else 'Missing'}")
-            print(f"  - AZURE_SPEECH_REGION: {'Set' if self.speech_region else 'Missing'}")
-        else:
-            print("Azure STT: Credentials found")
-            
-        self._is_listening = False
-        self._state = STTState.INITIALIZING
-        self.speech_queue = Queue()
+        super().__init__()
         self.config = config
-        
-        print(f"Azure STT: Initial config - Enabled: {self.config.enabled}")
+        self.speech_queue = Queue()
+        self.speech_key = os.getenv("AZURE_SPEECH_KEY")
+        self.speech_region = os.getenv("AZURE_SPEECH_REGION")
         if self.config.enabled:
             self.setup_recognizer()
             self._state = STTState.READY
         else:
             self._state = STTState.PAUSED
-            print("Azure STT: Started in paused state (STT disabled in config)")
 
     def setup_recognizer(self) -> None:
         print("\nAzure STT: Setting up recognizer...")
@@ -93,52 +80,47 @@ class AzureSTTProvider(BaseSTTProvider):
     def handle_final_result(self, evt) -> None:
         if evt.result.text:
             print(f"\nAzure STT [Final]: {evt.result.text}")
-            if self._is_listening and self.config.enabled:
+            if self.is_listening and self.config.enabled:
                 self.speech_queue.put(evt.result.text)
 
     def handle_interim_result(self, evt) -> None:
         if evt.result.text:
             print(f"\rAzure STT [Interim]: {evt.result.text}", end="", flush=True)
-            if (self._is_listening and self.config.enabled and 
+            if (self.is_listening and self.config.enabled and 
                 self.config.settings.get("INTERIM_RESULTS", False)):
                 self.speech_queue.put(f"(interim) {evt.result.text}")
 
-    def start_listening(self) -> None:
-        print(f"\nAzure STT: Start listening requested - Current state: {self._state}, Enabled: {self.config.enabled}")
-        if not self.config.enabled:
-            print("Azure STT: Cannot start - STT is globally disabled")
+    async def start_listening(self):
+        if self._state not in [STTState.IDLE, STTState.READY, STTState.PAUSED]:
             return
-            
-        if self._state == STTState.PAUSED:
-            print("Azure STT: Reinitializing recognizer from paused state...")
-            self.setup_recognizer()
-            self._state = STTState.READY
-            
-        if not self._is_listening and self._state == STTState.READY:
-            print("Azure STT: Starting continuous recognition...")
-            self._is_listening = True
-            self._state = STTState.LISTENING
+        try:
             self.speech_recognizer.start_continuous_recognition()
-            print("Azure STT: Started listening")
-        else:
-            print(f"Azure STT: Cannot start listening - Current state: {self._state}, Is listening: {self._is_listening}")
+            self._state = STTState.LISTENING
+        except Exception as e:
+            print(f"Azure STT: Error starting recognition: {e}")
+            self._state = STTState.ERROR
+
+    async def stop_listening(self):
+        if self._state != STTState.LISTENING:
+            return
+        try:
+            self.speech_recognizer.stop_continuous_recognition()
+            self._state = STTState.IDLE
+        except Exception as e:
+            print(f"Azure STT: Error stopping recognition: {e}")
+            self._state = STTState.ERROR
 
     def pause_listening(self) -> None:
-        print(f"\nAzure STT: Pause listening requested - Current state: {self._state}, Is listening: {self._is_listening}")
-        if self._is_listening:
-            print("Azure STT: Stopping continuous recognition...")
-            self._is_listening = False
-            self._state = STTState.PAUSED
+        if self._state == STTState.LISTENING:
             try:
                 self.speech_recognizer.stop_continuous_recognition()
-                # Clear any pending items in the queue
+                self._state = STTState.PAUSED
+                # Clear queue
                 while not self.speech_queue.empty():
                     self.speech_queue.get_nowait()
             except Exception as e:
                 print(f"Azure STT: Error during pause: {e}")
-            print("Azure STT: Paused listening")
-        else:
-            print("Azure STT: Already paused")
+                self._state = STTState.ERROR
 
     def get_speech_nowait(self) -> Optional[str]:
         try:
@@ -148,7 +130,8 @@ class AzureSTTProvider(BaseSTTProvider):
 
     @property
     def is_listening(self) -> bool:
-        return self._is_listening and self.config.enabled
+        # Remove _is_listening flag, use state instead
+        return self._state == STTState.LISTENING and self.config.enabled
 
     @property
     def state(self) -> STTState:

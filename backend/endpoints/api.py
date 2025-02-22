@@ -22,7 +22,7 @@ async def start_stt_endpoint():
     """
     print(f"Starting STT - Current state: {stt_instance.state}, Is listening: {stt_instance.is_listening}, Enabled: {CONFIG['GENERAL_AUDIO']['STT_ENABLED']}")
     if not stt_instance.is_listening:
-        stt_instance.start_listening()
+        await stt_instance.start_listening()
     return {"detail": "STT is now ON."}
 
 @router.post("/pause-stt")
@@ -98,7 +98,7 @@ async def stop_tts():
     # If using backend playback, we need to handle STT resumption here
     if CONFIG["GENERAL_AUDIO"]["TTS_PLAYBACK_LOCATION"] == "backend":
         logger.info("Backend playback mode: Resuming STT after TTS stop")
-        stt_instance.start_listening()
+        await stt_instance.start_listening()
     
     return {"status": "success", "message": "TTS stopped"}
 

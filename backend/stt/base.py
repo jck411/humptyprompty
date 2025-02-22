@@ -1,22 +1,39 @@
 from abc import ABC, abstractmethod
-from enum import Enum
-from typing import Optional
+from enum import Enum, auto
+from typing import Optional, Any, Dict
 
 class STTState(Enum):
-    INITIALIZING = "initializing"
-    READY = "ready"
-    LISTENING = "listening"
-    PAUSED = "paused"
-    ERROR = "error"
+    IDLE = auto()
+    READY = auto()
+    LISTENING = auto()
+    PAUSED = auto()
+    PROCESSING = auto()
+    ERROR = auto()
 
 class BaseSTTProvider(ABC):
     """Base class for all STT providers"""
     
+    def __init__(self):
+        self._state = STTState.IDLE
+
+    @property
+    def state(self) -> STTState:
+        return self._state
+
+    @property
+    def is_listening(self) -> bool:
+        return self._state == STTState.LISTENING
+
     @abstractmethod
-    def start_listening(self) -> None:
-        """Start listening for speech input"""
+    async def start_listening(self):
+        """Start listening for audio input"""
         pass
-    
+
+    @abstractmethod
+    async def stop_listening(self):
+        """Stop listening for audio input"""
+        pass
+
     @abstractmethod
     def pause_listening(self) -> None:
         """Pause speech recognition"""
@@ -25,16 +42,4 @@ class BaseSTTProvider(ABC):
     @abstractmethod
     def get_speech_nowait(self) -> Optional[str]:
         """Get recognized speech text without waiting"""
-        pass
-    
-    @property
-    @abstractmethod
-    def is_listening(self) -> bool:
-        """Check if the provider is currently listening"""
-        pass
-
-    @property
-    @abstractmethod
-    def state(self) -> STTState:
-        """Get the current state of the STT provider"""
         pass

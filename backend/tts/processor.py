@@ -44,7 +44,7 @@ def audio_player_sync(audio_queue: asyncio.Queue, loop: asyncio.AbstractEventLoo
         # Resume STT after backend playback finishes
         if CONFIG["GENERAL_AUDIO"]["TTS_PLAYBACK_LOCATION"] == "backend":
             logger.info("Backend playback finished, resuming STT...")
-            stt_instance.start_listening()
+            asyncio.run_coroutine_threadsafe(stt_instance.start_listening(), loop)
 
 async def start_audio_player_async(audio_queue: asyncio.Queue, loop: asyncio.AbstractEventLoop, stop_event: asyncio.Event):
     await asyncio.to_thread(audio_player_sync, audio_queue, loop, stop_event)
@@ -99,7 +99,7 @@ async def process_streams(phrase_queue: asyncio.Queue, audio_queue: asyncio.Queu
                 logger.info("TTS tasks cancelled, ensuring proper cleanup")
                 if stop_event.is_set():
                     logger.info("Stop event detected, resuming STT in backend mode")
-                    stt_instance.start_listening()
+                    await stt_instance.start_listening()
         else:
             logger.debug("Using frontend playback")
             await tts_task

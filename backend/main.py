@@ -76,7 +76,7 @@ class STTWebSocketHandler:
 
         try:
             if action == "start-stt":
-                stt_instance.start_listening()
+                await stt_instance.start_listening()
             elif action == "pause-stt":
                 stt_instance.pause_listening()
             
