@@ -29,7 +29,6 @@ from backend.tts.processor import process_streams, audio_player
 from backend.endpoints.api import router as api_router
 from backend.wakewords.detector import start_wake_word_thread
 from backend.stt.azure_stt import stt_instance
-# Import the global events from the state module
 from backend.endpoints.state import TTS_STOP_EVENT, GEN_STOP_EVENT
 
 from contextlib import asynccontextmanager
@@ -65,20 +64,25 @@ class STTWebSocketHandler:
     def __init__(self, websocket: WebSocket):
         self.websocket = websocket
         self.stt_task: Optional[asyncio.Task] = None
-        
-    async def handle_stt_control(self, action: str) -> None:
-        """Centralizes all STT control logic"""
-        print(f"\nSTT WebSocket Handler: Control action '{action}' requested")
-        
-        if not CONFIG["GENERAL_AUDIO"]["STT_ENABLED"]:
-            print("STT WebSocket Handler: STT globally disabled, ignoring control action")
-            return
 
+    async def handle_stt_control(self, action: str, update_global: bool = True) -> None:
+        """
+        Centralizes all STT control logic.
+        
+        When update_global is True (as with user toggle actions), the global STT flag is updated.
+        When update_global is False (as with temporary pauses during TTS playback), the global flag remains unchanged.
+        """
+        print(f"\nSTT WebSocket Handler: Control action '{action}' requested (update_global={update_global})")
+        
         try:
             if action == "start-stt":
+                if update_global:
+                    CONFIG["GENERAL_AUDIO"]["STT_ENABLED"] = True
                 await stt_instance.start_listening()
             elif action == "pause-stt":
                 stt_instance.pause_listening()
+                if update_global:
+                    CONFIG["GENERAL_AUDIO"]["STT_ENABLED"] = False
             
             # Always broadcast state after control actions
             await self._broadcast_state()
@@ -87,7 +91,9 @@ class STTWebSocketHandler:
             print(f"STT WebSocket Handler: Error during control action: {e}")
     
     async def start_stt_stream(self) -> None:
-        """Initializes STT streaming if Azure provider is configured and enabled"""
+        """
+        Initializes STT streaming if Azure provider is configured and STT is globally enabled.
+        """
         if (CONFIG["STT_MODELS"]["PROVIDER"] == "azure" and 
             CONFIG["GENERAL_AUDIO"]["STT_ENABLED"]):
             self.stt_task = asyncio.create_task(self._stream_stt())
@@ -111,7 +117,7 @@ class STTWebSocketHandler:
                     if recognized_text:
                         # Remove "(interim)" prefix if present for cleaner UI
                         if recognized_text.startswith("(interim) "):
-                            recognized_text = recognized_text[10:]  # Remove "(interim) "
+                            recognized_text = recognized_text[10:]
                             
                         message = {
                             "type": "stt",
@@ -138,7 +144,7 @@ class STTWebSocketHandler:
             raise
     
     async def _broadcast_state(self) -> None:
-        """Broadcasts STT state to connected clients"""
+        """Broadcasts STT state to all connected clients"""
         message = {
             "type": "stt_state",
             "is_listening": stt_instance.is_listening,
@@ -153,7 +159,7 @@ class STTWebSocketHandler:
         connected_websockets.difference_update(failed_ws)
     
     async def cleanup(self) -> None:
-        """Handles cleanup of STT resources"""
+        """Handles cleanup of STT resources on WebSocket disconnect"""
         print("\nSTT WebSocket Handler: Starting cleanup...")
         if self.stt_task:
             print("STT WebSocket Handler: Cancelling STT stream task")
@@ -185,15 +191,25 @@ async def unified_chat_websocket(websocket: WebSocket):
             action = data.get("action")
 
             if action in ["start-stt", "pause-stt"]:
+                # User toggle: update the global state.
                 await handler.handle_stt_control(action)
             elif action == "playback-complete":
-                # Only handle frontend playback completion if TTS is enabled and set to frontend
-                if (CONFIG["GENERAL_AUDIO"]["TTS_PLAYBACK_LOCATION"] == "frontend" and 
-                    CONFIG["GENERAL_AUDIO"].get("TTS_ENABLED", False)):
-                    print("Server: Received frontend playback-complete message, resuming STT...")
-                    await handler.handle_stt_control("start-stt")
+                # Only resume STT listening if STT is globally enabled.
+                if not CONFIG["GENERAL_AUDIO"]["STT_ENABLED"]:
+                    print("Server: Global STT is disabled; not resuming listening after playback complete.")
                 else:
-                    print("Server: Ignoring playback-complete message (TTS disabled or backend playback mode)")
+                    if CONFIG["GENERAL_AUDIO"].get("TTS_ENABLED", False):
+                        if CONFIG["GENERAL_AUDIO"]["TTS_PLAYBACK_LOCATION"] == "frontend":
+                            print("Server: Received frontend playback-complete message, resuming STT...")
+                            await handler.handle_stt_control("start-stt", update_global=False)
+                        else:
+                            print("Server: Ignoring playback-complete message (backend playback mode)")
+                    else:
+                        if not stt_instance.is_listening:
+                            print("Server: TTS is off but STT is not listening; resuming STT listening...")
+                            await handler.handle_stt_control("start-stt", update_global=False)
+                        else:
+                            print("Server: TTS is off and STT is already listening.")
             elif action == "chat":
                 print("\nProcessing new chat message...")
                 print(f"TTS Enabled: {CONFIG['GENERAL_AUDIO']['TTS_ENABLED']}")
@@ -209,9 +225,9 @@ async def unified_chat_websocket(websocket: WebSocket):
                 phrase_queue = asyncio.Queue()
                 audio_queue = asyncio.Queue()
 
-                # Only pause STT if TTS is enabled.
+                # For a chat, if TTS is enabled, temporarily pause STT without changing the global flag.
                 if CONFIG["GENERAL_AUDIO"].get("TTS_ENABLED", False):
-                    await handler.handle_stt_control("pause-stt")
+                    await handler.handle_stt_control("pause-stt", update_global=False)
                 else:
                     print("TTS is off; leaving STT listening state unchanged.")
 
