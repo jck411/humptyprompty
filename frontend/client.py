@@ -88,6 +88,7 @@ class CustomTextEdit(QTextEdit):
 class WebSocketClient(QThread):
     message_received = pyqtSignal(str)
     stt_text_received = pyqtSignal(str)
+    stt_state_received = pyqtSignal(bool)  # New signal for STT listening state
     connection_status = pyqtSignal(bool)
     audio_received = pyqtSignal(bytes)
     tts_state_changed = pyqtSignal(bool)
@@ -124,7 +125,10 @@ class WebSocketClient(QThread):
                         logger.info(f"Frontend: Received text message: {message[:100]}...")
                         try:
                             data = json.loads(message)
-                            if "content" in data:
+                            if data.get("type") == "stt_state":
+                                # Emit the listening state from the backend broadcast
+                                self.stt_state_received.emit(data.get("is_listening", False))
+                            elif "content" in data:
                                 self.message_received.emit(data["content"])
                             elif "stt_text" in data:
                                 self.stt_text_received.emit(data["stt_text"])
@@ -239,6 +243,9 @@ class ChatWindow(QMainWindow):
         # Button text will show the toggle target (i.e. "FRONT PLAY" when currently backend).
         self.playback_location = "backend"
         
+        # New variable to hold the actual listening state from backend
+        self.stt_listening = False  
+        
         self.init_states()
         self.setup_ui()
         self.setup_websocket()
@@ -257,7 +264,7 @@ class ChatWindow(QMainWindow):
             self.tts_enabled = False
         
         self.is_toggling_tts = False
-        self.stt_enabled = False
+        self.stt_enabled = False  # Global STT flag (when user toggles STT)
         self.is_toggling_stt = False
 
     def setup_ui(self):
@@ -279,6 +286,8 @@ class ChatWindow(QMainWindow):
         
         self.toggle_stt_button = QPushButton("STT Off")
         self.toggle_stt_button.setFixedSize(120, 40)
+        # Assign a unique object name for our STT button.
+        self.toggle_stt_button.setObjectName("sttButton")
         
         self.toggle_tts_button = QPushButton("TTS On" if self.tts_enabled else "TTS Off")
         self.toggle_tts_button.setFixedSize(120, 40)
@@ -287,7 +296,6 @@ class ChatWindow(QMainWindow):
         top_layout.addWidget(self.toggle_tts_button)
         
         # Single toggle button for switching playback location
-        # When current playback is backend, the button shows "FRONT PLAY" (i.e. switch to front)
         self.toggle_playback_button = QPushButton("FRONT PLAY")
         self.toggle_playback_button.setFixedSize(120, 40)
         top_layout.addWidget(self.toggle_playback_button)
@@ -391,6 +399,7 @@ class ChatWindow(QMainWindow):
         )
         self.ws_client.message_received.connect(self.handle_message)
         self.ws_client.stt_text_received.connect(self.handle_stt_text)
+        self.ws_client.stt_state_received.connect(self.handle_stt_state)  # Connect new signal
         self.ws_client.connection_status.connect(self.handle_connection_status)
         self.ws_client.audio_received.connect(self.on_audio_received)
         self.ws_client.tts_state_changed.connect(self.handle_tts_state_changed)
@@ -490,6 +499,13 @@ class ChatWindow(QMainWindow):
             QLabel {{
                 color: {COLORS['text_primary']};
             }}
+            /* Specific rule for the STT button when listening */
+            QPushButton#sttButton[isListening="true"] {{
+                background-color: red !important;
+                color: white !important;
+                border: none;
+                border-radius: 10px;
+            }}
         """)
         palette = self.text_input.palette()
         palette.setColor(QPalette.ColorRole.PlaceholderText, QColor(COLORS['text_secondary']))
@@ -584,6 +600,11 @@ class ChatWindow(QMainWindow):
         self.tts_enabled = is_enabled
         self.toggle_tts_button.setText("TTS On" if is_enabled else "TTS Off")
 
+    def handle_stt_state(self, is_listening: bool):
+        # This handler is connected to stt_state_received and updates the actual listening state.
+        self.stt_listening = is_listening
+        self.update_stt_button_style()
+
     def add_message(self, text, is_user):
         bubble = MessageBubble(text, is_user)
         if is_user:
@@ -627,6 +648,12 @@ class ChatWindow(QMainWindow):
         new_height = min(max(50, doc_height + 20), 100)
         self.text_input.setFixedHeight(int(new_height))
 
+    def update_stt_button_style(self):
+        # Update the STT button by setting its "isListening" property based on the actual listening state.
+        self.toggle_stt_button.setProperty("isListening", "true" if self.stt_listening else "false")
+        self.toggle_stt_button.style().unpolish(self.toggle_stt_button)
+        self.toggle_stt_button.style().polish(self.toggle_stt_button)
+
     def toggle_stt(self):
         self.is_toggling_stt = True
         try:
@@ -645,6 +672,7 @@ class ChatWindow(QMainWindow):
                 else:
                     logger.error("WebSocket is not connected; cannot pause STT.")
             self.toggle_stt_button.setText("STT On" if self.stt_enabled else "STT Off")
+            # Do not update style directly here; wait for backend broadcast to update self.stt_listening.
         except Exception as e:
             logger.error(f"Error toggling STT: {e}")
         finally:
@@ -753,7 +781,6 @@ class ChatWindow(QMainWindow):
             new_state = resp.json().get("playback_location", None)
             if new_state:
                 self.playback_location = new_state
-                # If current location is backend, then the toggle button should offer "FRONT PLAY"
                 if self.playback_location == "backend":
                     self.toggle_playback_button.setText("FRONT PLAY")
                 else:
