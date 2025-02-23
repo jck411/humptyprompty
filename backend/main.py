@@ -33,13 +33,11 @@ from backend.endpoints.state import TTS_STOP_EVENT, GEN_STOP_EVENT
 
 from contextlib import asynccontextmanager
 
-# Global WebSocket connections set
-connected_websockets: Set[WebSocket] = set()
-
+# ------------------------------------------------------------------------------
+# Global Initialization
+# ------------------------------------------------------------------------------
 load_dotenv()
-
 client, DEPLOYMENT_NAME = setup_chat_client()
-
 pyaudio_instance = PyAudioSingleton()
 
 def shutdown():
@@ -60,162 +58,152 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-class STTWebSocketHandler:
-    def __init__(self, websocket: WebSocket):
-        self.websocket = websocket
-        self.stt_task: Optional[asyncio.Task] = None
+# ------------------------------------------------------------------------------
+# Centralized STT Manager
+# ------------------------------------------------------------------------------
+class STTManager:
+    def __init__(self, config, stt_instance):
+        self.config = config
+        self.stt_instance = stt_instance
+        # Set of websockets for state broadcasts.
+        self.websocket_clients: Set[WebSocket] = set()
+        # Maintain a mapping of websocket to its associated STT streaming task.
+        self.stt_tasks: Dict[WebSocket, asyncio.Task] = {}
 
-    async def handle_stt_control(self, action: str, update_global: bool = True) -> None:
-        """
-        Centralizes all STT control logic.
-        
-        When update_global is True (as with user toggle actions), the global STT flag is updated.
-        When update_global is False (as with temporary pauses during TTS playback), the global flag remains unchanged.
-        """
-        print(f"\nSTT WebSocket Handler: Control action '{action}' requested (update_global={update_global})")
-        
-        try:
-            if action == "start-stt":
-                if update_global:
-                    CONFIG["GENERAL_AUDIO"]["STT_ENABLED"] = True
-                await stt_instance.start_listening()
-            elif action == "pause-stt":
-                stt_instance.pause_listening()
-                if update_global:
-                    CONFIG["GENERAL_AUDIO"]["STT_ENABLED"] = False
-            
-            # Always broadcast state after control actions
-            await self._broadcast_state()
-            print(f"STT WebSocket Handler: Control action '{action}' completed")
-        except Exception as e:
-            print(f"STT WebSocket Handler: Error during control action: {e}")
-    
-    async def start_stt_stream(self) -> None:
-        """
-        Initializes STT streaming if Azure provider is configured and STT is globally enabled.
-        """
-        if (CONFIG["STT_MODELS"]["PROVIDER"] == "azure" and 
-            CONFIG["GENERAL_AUDIO"]["STT_ENABLED"]):
-            self.stt_task = asyncio.create_task(self._stream_stt())
-    
-    async def _stream_stt(self) -> None:
-        """Handles STT streaming to client"""
-        print("\nSTT WebSocket Handler: Starting STT stream...")
+    async def start(self, update_global: bool = True):
+        print("STTManager: Starting STT")
+        if update_global:
+            self.config["GENERAL_AUDIO"]["STT_ENABLED"] = True
+        await self.stt_instance.start_listening()
+
+    def pause(self, update_global: bool = True):
+        print("STTManager: Pausing STT")
+        self.stt_instance.pause_listening()
+        if update_global:
+            self.config["GENERAL_AUDIO"]["STT_ENABLED"] = False
+
+    async def broadcast_state(self):
+        message = {
+            "type": "stt_state",
+            "is_listening": self.stt_instance.is_listening,
+            "is_enabled": self.config["GENERAL_AUDIO"]["STT_ENABLED"]
+        }
+        failed_ws = set()
+        for ws in self.websocket_clients:
+            try:
+                await ws.send_json(message)
+            except Exception as e:
+                print(f"STTManager: Error broadcasting state: {e}")
+                failed_ws.add(ws)
+        self.websocket_clients.difference_update(failed_ws)
+
+    async def stream_stt(self, websocket: WebSocket):
+        print("STTManager: Starting STT stream for a websocket")
         try:
             while True:
-                if not CONFIG["GENERAL_AUDIO"]["STT_ENABLED"]:
-                    print("STT WebSocket Handler: STT disabled, waiting...")
-                    await asyncio.sleep(0.5)  # Check less frequently when disabled
+                if not self.config["GENERAL_AUDIO"]["STT_ENABLED"]:
+                    print("STTManager: STT disabled, waiting...")
+                    await asyncio.sleep(0.5)
                     continue
 
-                if not stt_instance.is_listening:
-                    await asyncio.sleep(0.1)  # Brief pause when not listening
+                if not self.stt_instance.is_listening:
+                    await asyncio.sleep(0.1)
                     continue
 
                 try:
-                    recognized_text = stt_instance.get_speech_nowait()
+                    recognized_text = self.stt_instance.get_speech_nowait()
                     if recognized_text:
-                        # Remove "(interim)" prefix if present for cleaner UI
+                        # Remove "(interim)" prefix for cleaner output
                         if recognized_text.startswith("(interim) "):
                             recognized_text = recognized_text[10:]
-                            
-                        message = {
-                            "type": "stt",
-                            "stt_text": recognized_text
-                        }
-                        print(f"STT WebSocket Handler: Sending text to client: {message}")
+                        message = {"type": "stt", "stt_text": recognized_text}
                         try:
-                            await self.websocket.send_json(message)
+                            await websocket.send_json(message)
                         except Exception as e:
-                            print(f"STT WebSocket Handler: Error sending text: {e}")
-                            if "Connection is closed" in str(e):
-                                break
+                            print(f"STTManager: Error sending STT message: {e}")
+                            break
                 except Exception as e:
-                    print(f"STT WebSocket Handler: Error getting speech: {e}")
+                    print(f"STTManager: Error getting speech: {e}")
                     await asyncio.sleep(0.1)
                     continue
 
                 await asyncio.sleep(0.05)
         except asyncio.CancelledError:
-            print("STT WebSocket Handler: Stream task cancelled")
+            print("STTManager: STT stream task cancelled")
             raise
         except Exception as e:
-            print(f"STT WebSocket Handler: Unexpected error in stream: {e}")
+            print(f"STTManager: Unexpected error in STT stream: {e}")
             raise
-    
-    async def _broadcast_state(self) -> None:
-        """Broadcasts STT state to all connected clients"""
-        message = {
-            "type": "stt_state",
-            "is_listening": stt_instance.is_listening,
-            "is_enabled": CONFIG["GENERAL_AUDIO"]["STT_ENABLED"]
-        }
-        failed_ws = set()
-        for websocket in connected_websockets:
+
+    async def cleanup(self, websocket: WebSocket):
+        print("STTManager: Cleaning up for a websocket")
+        if websocket in self.stt_tasks:
+            task = self.stt_tasks[websocket]
+            task.cancel()
             try:
-                await websocket.send_json(message)
-            except Exception:
-                failed_ws.add(websocket)
-        connected_websockets.difference_update(failed_ws)
-    
-    async def cleanup(self) -> None:
-        """Handles cleanup of STT resources on WebSocket disconnect"""
-        print("\nSTT WebSocket Handler: Starting cleanup...")
-        if self.stt_task:
-            print("STT WebSocket Handler: Cancelling STT stream task")
-            self.stt_task.cancel()
-            try:
-                await self.stt_task
+                await task
             except asyncio.CancelledError:
                 pass
-            
-        print("STT WebSocket Handler: Pausing STT")
-        stt_instance.pause_listening()
-        await self._broadcast_state()
+            del self.stt_tasks[websocket]
+        self.pause(update_global=True)
+        await self.broadcast_state()
         try:
-            await self.websocket.send_json({"is_listening": False})
+            await websocket.send_json({"is_listening": False})
         except Exception as e:
-            print(f"STT WebSocket Handler: Error during cleanup: {e}")
+            print(f"STTManager: Error sending cleanup state: {e}")
 
+# Instantiate the STTManager
+stt_manager = STTManager(CONFIG, stt_instance)
+
+# ------------------------------------------------------------------------------
+# WebSocket Endpoint
+# ------------------------------------------------------------------------------
 @app.websocket("/ws/chat")
 async def unified_chat_websocket(websocket: WebSocket):
     await websocket.accept()
-    connected_websockets.add(websocket)
+    stt_manager.websocket_clients.add(websocket)
     
-    handler = STTWebSocketHandler(websocket)
-    await handler.start_stt_stream()
+    # Start the STT streaming task for this websocket
+    stt_task = asyncio.create_task(stt_manager.stream_stt(websocket))
+    stt_manager.stt_tasks[websocket] = stt_task
 
     try:
         while True:
             data = await websocket.receive_json()
             action = data.get("action")
-
+            
             if action in ["start-stt", "pause-stt"]:
-                # User toggle: update the global state.
-                await handler.handle_stt_control(action)
+                if action == "start-stt":
+                    await stt_manager.start(update_global=True)
+                elif action == "pause-stt":
+                    stt_manager.pause(update_global=True)
+                await stt_manager.broadcast_state()
+
             elif action == "playback-complete":
-                # Only resume STT listening if STT is globally enabled.
+                # Resume STT only if globally enabled.
                 if not CONFIG["GENERAL_AUDIO"]["STT_ENABLED"]:
                     print("Server: Global STT is disabled; not resuming listening after playback complete.")
                 else:
                     if CONFIG["GENERAL_AUDIO"].get("TTS_ENABLED", False):
                         if CONFIG["GENERAL_AUDIO"]["TTS_PLAYBACK_LOCATION"] == "frontend":
                             print("Server: Received frontend playback-complete message, resuming STT...")
-                            await handler.handle_stt_control("start-stt", update_global=False)
+                            await stt_manager.start(update_global=False)
                         else:
                             print("Server: Ignoring playback-complete message (backend playback mode)")
                     else:
                         if not stt_instance.is_listening:
                             print("Server: TTS is off but STT is not listening; resuming STT listening...")
-                            await handler.handle_stt_control("start-stt", update_global=False)
+                            await stt_manager.start(update_global=False)
                         else:
                             print("Server: TTS is off and STT is already listening.")
+                    await stt_manager.broadcast_state()
+
             elif action == "chat":
                 print("\nProcessing new chat message...")
                 print(f"TTS Enabled: {CONFIG['GENERAL_AUDIO']['TTS_ENABLED']}")
                 print(f"TTS Location: {CONFIG['GENERAL_AUDIO']['TTS_PLAYBACK_LOCATION']}")
                 
-                # Clear events to start fresh for the new chat.
+                # Clear events for the new chat.
                 TTS_STOP_EVENT.clear()
                 GEN_STOP_EVENT.clear()
 
@@ -225,9 +213,10 @@ async def unified_chat_websocket(websocket: WebSocket):
                 phrase_queue = asyncio.Queue()
                 audio_queue = asyncio.Queue()
 
-                # For a chat, if TTS is enabled, temporarily pause STT without changing the global flag.
+                # For a chat, if TTS is enabled, pause STT temporarily without changing global flag.
                 if CONFIG["GENERAL_AUDIO"].get("TTS_ENABLED", False):
-                    await handler.handle_stt_control("pause-stt", update_global=False)
+                    stt_manager.pause(update_global=False)
+                    await stt_manager.broadcast_state()
                 else:
                     print("TTS is off; leaving STT listening state unchanged.")
 
@@ -262,16 +251,18 @@ async def unified_chat_websocket(websocket: WebSocket):
                     if audio_forward_task:
                         await audio_forward_task
                     print("Cleanup completed")
-
     except WebSocketDisconnect:
         pass
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"WebSocket error: {e}")
     finally:
-        await handler.cleanup()
-        connected_websockets.discard(websocket)
+        await stt_manager.cleanup(websocket)
+        stt_manager.websocket_clients.discard(websocket)
         await websocket.close()
 
+# ------------------------------------------------------------------------------
+# Audio Forwarding Function
+# ------------------------------------------------------------------------------
 async def forward_audio_to_websocket(
     audio_queue: asyncio.Queue, 
     websocket: WebSocket,
@@ -283,15 +274,14 @@ async def forward_audio_to_websocket(
                 print("Audio forwarding stopped by stop event")
                 await websocket.send_bytes(b'audio:')  # Send empty audio marker
                 break
-                
+
             try:
                 audio_data = await audio_queue.get()
                 if audio_data is None:
-                    # Send an empty audio marker to signal end of stream
                     print("Received None in audio queue, sending audio end marker")
                     await websocket.send_bytes(b'audio:')
                     break
-                # Ensure proper message format with audio: prefix
+                # Prepend "audio:" if not already present.
                 message = b'audio:' + audio_data if not audio_data.startswith(b'audio:') else audio_data
                 await websocket.send_bytes(message)
             except Exception as e:
@@ -300,12 +290,14 @@ async def forward_audio_to_websocket(
     except Exception as e:
         print(f"Forward audio task error: {e}")
     finally:
-        # Ensure we always send the end marker
         try:
             await websocket.send_bytes(b'audio:')
         except Exception as e:
             print(f"Error sending final empty message: {e}")
 
+# ------------------------------------------------------------------------------
+# Include Additional API Routes & Run Uvicorn
+# ------------------------------------------------------------------------------
 app.include_router(api_router)
 
 if __name__ == "__main__":
