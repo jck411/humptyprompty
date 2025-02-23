@@ -6,8 +6,9 @@ from backend.stt.config import STTConfig
 
 class AzureSTTProvider(BaseSTTProvider):
     def __init__(self, config: STTConfig):
-        super().__init__()
-        self.config = config
+        # Pass the entire config to the base class.
+        super().__init__(config)
+        self.config = config  # Ensures that we have access to all settings.
         self.speech_key = os.getenv("AZURE_SPEECH_KEY")
         self.speech_region = os.getenv("AZURE_SPEECH_REGION")
         if self.config.enabled:
@@ -24,21 +25,21 @@ class AzureSTTProvider(BaseSTTProvider):
             raise ValueError("Azure Speech Key or Region is not set.")
 
         try:
-            # Create the SpeechConfig using subscription key and region
+            # Create the SpeechConfig using subscription key and region.
             speech_config = speechsdk.SpeechConfig(
                 subscription=self.speech_key,
                 region=self.speech_region
             )
             print("Azure STT: Created speech config")
             
-            # Configure language
+            # Configure language.
             speech_config.speech_recognition_language = self.config.settings.get("LANGUAGE", "en-US")
 
-            # Configure auto punctuation
+            # Configure auto punctuation.
             if self.config.settings.get("AUTO_PUNCTUATION", False):
                 speech_config.set_property_by_name("SpeechServiceResponse_AutoPunctuation", "true")
 
-            # Configure profanity filtering
+            # Configure profanity filtering.
             profanity_option = self.config.settings.get("PROFANITY_OPTION", "raw").lower()
             if profanity_option == "raw":
                 speech_config.set_profanity(speechsdk.ProfanityOption.Raw)
@@ -47,14 +48,14 @@ class AzureSTTProvider(BaseSTTProvider):
             elif profanity_option == "removed":
                 speech_config.set_profanity(speechsdk.ProfanityOption.Removed)
 
-            # Create audio config from the default microphone
+            # Create audio config from the default microphone.
             audio_config = speechsdk.audio.AudioConfig(use_default_microphone=True)
             self.speech_recognizer = speechsdk.SpeechRecognizer(
                 speech_config=speech_config,
                 audio_config=audio_config
             )
 
-            # Connect events
+            # Connect events.
             self.speech_recognizer.recognized.connect(self.handle_final_result)
             self.speech_recognizer.recognizing.connect(self.handle_interim_result)
             self.speech_recognizer.session_started.connect(
@@ -107,12 +108,12 @@ class AzureSTTProvider(BaseSTTProvider):
             print(f"Azure STT: Error during pause: {e}")
             self._state = STTState.ERROR
 
-# Create configuration from global config
+# Create configuration from global config.
 stt_config = STTConfig(
     provider="azure",
     settings=CONFIG["STT_MODELS"]["AZURE_STT"],
     enabled=CONFIG["GENERAL_AUDIO"]["STT_ENABLED"]
 )
 
-# Create a single instance for your application
+# Create a single instance for your application.
 stt_instance = AzureSTTProvider(stt_config)

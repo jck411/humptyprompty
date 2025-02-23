@@ -10,7 +10,9 @@ class STTState(Enum):
     ERROR = auto()
 
 class BaseSTTProvider(ABC):
-    def __init__(self):
+    def __init__(self, config):
+        # Store the full config as the single source of truth.
+        self.config = config
         self._state = STTState.IDLE
         self.speech_queue = Queue()
 
@@ -43,6 +45,9 @@ class BaseSTTProvider(ABC):
         pass
 
     async def start_listening(self):
+        if not self.config.enabled:
+            print("STT is globally disabled, cannot start listening.")
+            return
         if self._state not in [STTState.IDLE, STTState.READY, STTState.PAUSED]:
             return
         try:

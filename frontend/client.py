@@ -631,15 +631,21 @@ class ChatWindow(QMainWindow):
         self.is_toggling_stt = True
         try:
             if not self.stt_enabled:
-                resp = requests.post(f"{HTTP_BASE_URL}/api/start-stt")
-                resp.raise_for_status()
-                self.stt_enabled = True
+                # Use WebSocket to start STT and initiate listening
+                if self.ws_client.ws:
+                    asyncio.run(self.ws_client.ws.send(json.dumps({"action": "start-stt"})))
+                    self.stt_enabled = True
+                else:
+                    logger.error("WebSocket is not connected; cannot start STT.")
             else:
-                resp = requests.post(f"{HTTP_BASE_URL}/api/pause-stt")
-                resp.raise_for_status()
-                self.stt_enabled = False
+                # Use WebSocket to pause STT and stop listening
+                if self.ws_client.ws:
+                    asyncio.run(self.ws_client.ws.send(json.dumps({"action": "pause-stt"})))
+                    self.stt_enabled = False
+                else:
+                    logger.error("WebSocket is not connected; cannot pause STT.")
             self.toggle_stt_button.setText("STT On" if self.stt_enabled else "STT Off")
-        except requests.RequestException as e:
+        except Exception as e:
             logger.error(f"Error toggling STT: {e}")
         finally:
             self.is_toggling_stt = False
