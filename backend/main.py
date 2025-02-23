@@ -187,12 +187,13 @@ async def unified_chat_websocket(websocket: WebSocket):
             if action in ["start-stt", "pause-stt"]:
                 await handler.handle_stt_control(action)
             elif action == "playback-complete":
-                # Only handle frontend playback completion via WebSocket
-                if CONFIG["GENERAL_AUDIO"]["TTS_PLAYBACK_LOCATION"] == "frontend":
+                # Only handle frontend playback completion if TTS is enabled and set to frontend
+                if (CONFIG["GENERAL_AUDIO"]["TTS_PLAYBACK_LOCATION"] == "frontend" and 
+                    CONFIG["GENERAL_AUDIO"].get("TTS_ENABLED", False)):
                     print("Server: Received frontend playback-complete message, resuming STT...")
                     await handler.handle_stt_control("start-stt")
                 else:
-                    print("Server: Ignoring frontend playback-complete message in backend playback mode")
+                    print("Server: Ignoring playback-complete message (TTS disabled or backend playback mode)")
             elif action == "chat":
                 print("\nProcessing new chat message...")
                 print(f"TTS Enabled: {CONFIG['GENERAL_AUDIO']['TTS_ENABLED']}")
@@ -208,14 +209,19 @@ async def unified_chat_websocket(websocket: WebSocket):
                 phrase_queue = asyncio.Queue()
                 audio_queue = asyncio.Queue()
 
-                await handler.handle_stt_control("pause-stt")
+                # Only pause STT if TTS is enabled.
+                if CONFIG["GENERAL_AUDIO"].get("TTS_ENABLED", False):
+                    await handler.handle_stt_control("pause-stt")
+                else:
+                    print("TTS is off; leaving STT listening state unchanged.")
 
                 process_streams_task = asyncio.create_task(process_streams(
                     phrase_queue, audio_queue, TTS_STOP_EVENT
                 ))
 
                 audio_forward_task = None
-                if CONFIG["GENERAL_AUDIO"]["TTS_PLAYBACK_LOCATION"] == "frontend":
+                if (CONFIG["GENERAL_AUDIO"]["TTS_PLAYBACK_LOCATION"] == "frontend" and 
+                    CONFIG["GENERAL_AUDIO"].get("TTS_ENABLED", False)):
                     print("Setting up frontend audio forwarding...")
                     audio_forward_task = asyncio.create_task(forward_audio_to_websocket(
                         audio_queue, websocket, TTS_STOP_EVENT
