@@ -2,9 +2,8 @@
 import sys
 import json
 import asyncio
-import requests
+import aiohttp
 import logging
-from queue import Queue
 
 # PyQt6 Imports
 from PyQt6.QtWidgets import (
@@ -14,6 +13,9 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QTimer, QSize, QMutex, QMutexLocker, QIODevice, QThread, pyqtSignal
 from PyQt6.QtGui import QColor, QPalette, QIcon
 from PyQt6.QtMultimedia import QAudioFormat, QAudioSink, QMediaDevices, QAudio
+
+# qasync integration
+from qasync import QEventLoop
 
 # ----------------------- CONFIGURATION -----------------------
 SERVER_HOST = "192.168.1.226"  # Adjust as needed
@@ -69,12 +71,14 @@ class MessageBubble(QFrame):
         self.label.setWordWrap(True)
         self.label.setStyleSheet("font-size: 14px;")
         layout.addWidget(self.label)
+
     def update_text(self, new_text):
         self.label.setText(new_text)
 
 class CustomTextEdit(QTextEdit):
     def __init__(self, parent=None):
         super().__init__(parent)
+
     def keyPressEvent(self, event):
         # Send message on Enter (without Shift)
         if event.key() == Qt.Key.Key_Return and not (event.modifiers() & Qt.KeyboardModifier.ShiftModifier):
@@ -227,8 +231,14 @@ class ChatWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("Modern Chat Interface")
         self.setMinimumSize(800, 600)
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         
+        # Create one central widget and main layout
+        main_widget = QWidget()
+        self.setCentralWidget(main_widget)
+        self.main_layout = QVBoxLayout(main_widget)
+        self.main_layout.setContentsMargins(5, 5, 5, 5)
+        self.main_layout.setSpacing(2)
+
         # Kiosk mode
         self.is_kiosk_mode = False
         self.normal_window_flags = self.windowFlags()
@@ -248,20 +258,29 @@ class ChatWindow(QMainWindow):
         # Variable for the actual listening state from backend
         self.stt_listening = False  
         
-        self.init_states()
-        self.setup_ui()
+        # Setup UI components
+        self.setup_top_buttons_layout()
+        self.setup_chat_area_layout()
+        self.setup_input_area_layout()
+        
         self.setup_websocket()
         self.setup_audio()
         self.apply_styling()
-        self.load_playback_state()  # Load initial playback state from the config
+        
+        # Schedule async initialization tasks once the event loop is running.
+        QTimer.singleShot(0, lambda: asyncio.create_task(self._init_states_async()))
+        QTimer.singleShot(0, lambda: asyncio.create_task(self.load_playback_state_async()))
+        
         self.theme_toggle.setIcon(QIcon("/home/jack/humptyprompty/frontend/icons/light_mode_24dp_E8EAED.svg"))
 
-    def init_states(self):
+    async def _init_states_async(self):
         try:
-            resp = requests.post(f"{HTTP_BASE_URL}/api/toggle-tts")
-            resp.raise_for_status()
-            self.tts_enabled = resp.json().get("tts_enabled", False)
-        except requests.RequestException as e:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(f"{HTTP_BASE_URL}/api/toggle-tts") as resp:
+                    data = await resp.json()
+                    self.tts_enabled = data.get("tts_enabled", False)
+                    logger.info(f"Initial TTS state: {self.tts_enabled}")
+        except Exception as e:
             logger.error(f"Error getting initial TTS state: {e}")
             self.tts_enabled = False
         
@@ -269,35 +288,22 @@ class ChatWindow(QMainWindow):
         self.stt_enabled = False  # Global STT flag (when user toggles STT)
         self.is_toggling_stt = False
 
-    def load_playback_state(self):
+    async def load_playback_state_async(self):
         try:
-            resp = requests.get(f"{HTTP_BASE_URL}/api/playback-location")
-            resp.raise_for_status()
-            new_state = resp.json().get("playback_location", None)
-            if new_state:
-                self.playback_location = new_state
-                if self.playback_location == "backend":
-                    self.toggle_playback_button.setText("BACK PLAY")
-                else:
-                    self.toggle_playback_button.setText("FRONT PLAY")
-                logger.info(f"Loaded playback location: {self.playback_location}")
-            else:
-                logger.error("No playback_location returned from GET /api/playback-location")
+            async with aiohttp.ClientSession() as session:
+                async with session.get(f"{HTTP_BASE_URL}/api/playback-location") as resp:
+                    data = await resp.json()
+                    new_state = data.get("playback_location", None)
+                    if new_state:
+                        self.playback_location = new_state
+                        self.toggle_playback_button.setText("BACK PLAY" if self.playback_location == "backend" else "FRONT PLAY")
+                        logger.info(f"Loaded playback location: {self.playback_location}")
+                    else:
+                        logger.error("No playback_location returned from GET /api/playback-location")
         except Exception as e:
             logger.error(f"Error loading playback location: {e}")
 
-    def setup_ui(self):
-        main_widget = QWidget()
-        self.setCentralWidget(main_widget)
-        layout = QVBoxLayout(main_widget)
-        layout.setContentsMargins(5, 5, 5, 5)
-        layout.setSpacing(2)
-
-        self.setup_top_buttons(layout)
-        self.setup_chat_area(layout)
-        self.setup_input_area(layout)
-
-    def setup_top_buttons(self, layout):
+    def setup_top_buttons_layout(self):
         self.top_widget = QWidget()
         top_layout = QHBoxLayout(self.top_widget)
         top_layout.setContentsMargins(0, 5, 0, 0)
@@ -307,7 +313,7 @@ class ChatWindow(QMainWindow):
         self.toggle_stt_button.setFixedSize(120, 40)
         self.toggle_stt_button.setObjectName("sttButton")
         
-        self.toggle_tts_button = QPushButton("TTS On" if self.tts_enabled else "TTS Off")
+        self.toggle_tts_button = QPushButton("TTS On" if getattr(self, 'tts_enabled', False) else "TTS Off")
         self.toggle_tts_button.setFixedSize(120, 40)
 
         top_layout.addWidget(self.toggle_stt_button)
@@ -334,13 +340,13 @@ class ChatWindow(QMainWindow):
         """)
         top_layout.addWidget(self.theme_toggle)
         
-        layout.addWidget(self.top_widget)
+        self.main_layout.addWidget(self.top_widget)
         
         self.toggle_stt_button.clicked.connect(self.toggle_stt)
-        self.toggle_tts_button.clicked.connect(self.toggle_tts)
-        self.toggle_playback_button.clicked.connect(self.toggle_playback)
+        self.toggle_tts_button.clicked.connect(lambda: asyncio.create_task(self.toggle_tts_async()))
+        self.toggle_playback_button.clicked.connect(lambda: asyncio.create_task(self.toggle_playback_async()))
 
-    def setup_chat_area(self, layout):
+    def setup_chat_area_layout(self):
         self.chat_area = QWidget()
         self.chat_area.setAutoFillBackground(True)
         self.chat_area.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
@@ -365,9 +371,9 @@ class ChatWindow(QMainWindow):
         scroll_palette.setColor(QPalette.ColorRole.Window, QColor(COLORS['background']))
         scroll.setPalette(scroll_palette)
         
-        layout.addWidget(scroll, stretch=1)
+        self.main_layout.addWidget(scroll, stretch=1)
 
-    def setup_input_area(self, layout):
+    def setup_input_area_layout(self):
         input_widget = QWidget()
         input_layout = QHBoxLayout(input_widget)
         input_layout.setContentsMargins(0, 0, 0, 0)
@@ -399,11 +405,11 @@ class ChatWindow(QMainWindow):
         input_layout.addWidget(self.text_input, stretch=1)
         input_layout.addWidget(button_widget)
 
-        layout.addWidget(input_widget)
+        self.main_layout.addWidget(input_widget)
 
         send_button.clicked.connect(self.send_message)
         self.text_input.textChanged.connect(self.adjust_text_input_height)
-        self.stop_all_button.clicked.connect(self.stop_tts_and_generation)
+        self.stop_all_button.clicked.connect(lambda: asyncio.create_task(self.stop_tts_and_generation_async()))
 
     def setup_websocket(self):
         self.ws_client = WebSocketClient(
@@ -530,7 +536,9 @@ class ChatWindow(QMainWindow):
         self.is_dark_mode = not self.is_dark_mode
         global COLORS
         COLORS = DARK_COLORS if self.is_dark_mode else LIGHT_COLORS
-        icon_path = "/home/jack/humptyprompty/frontend/icons/light_mode_24dp_E8EAED.svg" if self.is_dark_mode else "/home/jack/humptyprompty/frontend/icons/dark_mode_24dp_E8EAED.svg"
+        icon_path = ("/home/jack/humptyprompty/frontend/icons/light_mode_24dp_E8EAED.svg" 
+                     if self.is_dark_mode 
+                     else "/home/jack/humptyprompty/frontend/icons/dark_mode_24dp_E8EAED.svg")
         self.theme_toggle.setIcon(QIcon(icon_path))
         self.chat_area.setStyleSheet(f"background-color: {COLORS['background']};")
         scroll_area = self.findChild(QScrollArea)
@@ -574,7 +582,6 @@ class ChatWindow(QMainWindow):
             try:
                 self.finalize_assistant_bubble()
                 self.add_message(text, True)
-                # Schedule the send_message coroutine on the WebSocketClient's event loop
                 asyncio.run_coroutine_threadsafe(
                     self.ws_client.send_message(text),
                     self.ws_client.loop
@@ -698,50 +705,52 @@ class ChatWindow(QMainWindow):
         finally:
             self.is_toggling_stt = False
 
-    def toggle_tts(self):
+    async def toggle_tts_async(self):
         self.is_toggling_tts = True
         try:
-            resp = requests.post(f"{HTTP_BASE_URL}/api/toggle-tts")
-            resp.raise_for_status()
-            data = resp.json()
-            self.tts_enabled = data.get("tts_enabled", self.tts_enabled)
-            if not self.tts_enabled:
-                stop_resp = requests.post(f"{HTTP_BASE_URL}/api/stop-tts")
-                stop_resp.raise_for_status()
-                self.audio_device.audio_buffer.clear()
-                while not self.audio_queue.empty():
-                    try:
-                        self.audio_queue.get_nowait()
-                    except:
-                        pass
-                self.audio_queue.put_nowait(None)
-            self.toggle_tts_button.setText("TTS On" if self.tts_enabled else "TTS Off")
-        except requests.RequestException as e:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(f"{HTTP_BASE_URL}/api/toggle-tts") as resp:
+                    data = await resp.json()
+                    self.tts_enabled = data.get("tts_enabled", self.tts_enabled)
+                if not self.tts_enabled:
+                    async with session.post(f"{HTTP_BASE_URL}/api/stop-tts") as stop_resp:
+                        await stop_resp.json()
+                    with QMutexLocker(self.audio_device.mutex):
+                        self.audio_device.audio_buffer.clear()
+                    while not self.audio_queue.empty():
+                        try:
+                            self.audio_queue.get_nowait()
+                        except:
+                            pass
+                    self.audio_queue.put_nowait(None)
+                self.toggle_tts_button.setText("TTS On" if self.tts_enabled else "TTS Off")
+        except Exception as e:
             logger.error(f"Error toggling TTS: {e}")
         finally:
             self.is_toggling_tts = False
 
-    def toggle_playback(self):
+    async def toggle_playback_async(self):
         try:
-            resp = requests.post(f"{HTTP_BASE_URL}/api/toggle-playback-location")
-            resp.raise_for_status()
-            new_state = resp.json().get("playback_location", None)
-            if new_state:
-                self.playback_location = new_state
-                if self.playback_location == "backend":
-                    self.toggle_playback_button.setText("BACK PLAY")
-                else:
-                    self.toggle_playback_button.setText("FRONT PLAY")
-                logger.info(f"Playback location toggled to {self.playback_location}")
-            else:
-                logger.error("No playback_location returned from toggle endpoint")
+            async with aiohttp.ClientSession() as session:
+                async with session.post(f"{HTTP_BASE_URL}/api/toggle-playback-location") as resp:
+                    data = await resp.json()
+                    new_state = data.get("playback_location", None)
+                    if new_state:
+                        self.playback_location = new_state
+                        self.toggle_playback_button.setText("BACK PLAY" if self.playback_location == "backend" else "FRONT PLAY")
+                        logger.info(f"Playback location toggled to {self.playback_location}")
+                    else:
+                        logger.error("No playback_location returned from toggle endpoint")
         except Exception as e:
             logger.error(f"Error toggling playback location: {e}")
 
-    def stop_tts_and_generation(self):
+    async def stop_tts_and_generation_async(self):
         try:
-            requests.post(f"{HTTP_BASE_URL}/api/stop-tts").raise_for_status()
-            requests.post(f"{HTTP_BASE_URL}/api/stop-generation").raise_for_status()
+            async with aiohttp.ClientSession() as session:
+                async with session.post(f"{HTTP_BASE_URL}/api/stop-tts") as resp1:
+                    await resp1.json()
+                async with session.post(f"{HTTP_BASE_URL}/api/stop-generation") as resp2:
+                    await resp2.json()
             with QMutexLocker(self.audio_device.mutex):
                 self.audio_device.clear_buffer()
                 self.audio_device.mark_end_of_stream()
@@ -751,7 +760,7 @@ class ChatWindow(QMainWindow):
                     except:
                         pass
                 self.audio_queue.put_nowait(None)
-        except requests.RequestException as e:
+        except Exception as e:
             logger.error(f"Error stopping TTS and generation: {e}")
         self.finalize_assistant_bubble()
 
@@ -813,7 +822,10 @@ class ChatWindow(QMainWindow):
 # ----------------------- MAIN -----------------------
 if __name__ == '__main__':
     app = QApplication(sys.argv)
+    loop = QEventLoop(app)
+    asyncio.set_event_loop(loop)
     window = ChatWindow()
     window.apply_styling()
     window.show()
-    sys.exit(app.exec())
+    with loop:
+        loop.run_forever()
