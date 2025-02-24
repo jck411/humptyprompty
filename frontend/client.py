@@ -88,7 +88,7 @@ class CustomTextEdit(QTextEdit):
 class WebSocketClient(QThread):
     message_received = pyqtSignal(str)
     stt_text_received = pyqtSignal(str)
-    stt_state_received = pyqtSignal(bool)  # New signal for STT listening state
+    stt_state_received = pyqtSignal(bool)  # Signal for STT listening state
     connection_status = pyqtSignal(bool)
     audio_received = pyqtSignal(bytes)
     tts_state_changed = pyqtSignal(bool)
@@ -102,6 +102,7 @@ class WebSocketClient(QThread):
         self.ws = None
         self.running = True
         self.messages = []
+        self.loop = None  # This will hold our dedicated event loop
 
     async def connect(self):
         import websockets
@@ -126,7 +127,6 @@ class WebSocketClient(QThread):
                         try:
                             data = json.loads(message)
                             if data.get("type") == "stt_state":
-                                # Emit the listening state from the backend broadcast
                                 self.stt_state_received.emit(data.get("is_listening", False))
                             elif "content" in data:
                                 self.message_received.emit(data["content"])
@@ -154,7 +154,10 @@ class WebSocketClient(QThread):
         self.messages.append({"sender": "assistant", "text": message})
 
     def run(self):
-        asyncio.run(self.connect())
+        # Create and set a dedicated event loop for this thread
+        self.loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(self.loop)
+        self.loop.run_until_complete(self.connect())
 
 # ----------------------- AUDIO SETUP -----------------------
 class QueueAudioDevice(QIODevice):
@@ -242,7 +245,7 @@ class ChatWindow(QMainWindow):
         # Default playback location is backend.
         self.playback_location = "backend"
         
-        # New variable to hold the actual listening state from backend
+        # Variable for the actual listening state from backend
         self.stt_listening = False  
         
         self.init_states()
@@ -302,7 +305,6 @@ class ChatWindow(QMainWindow):
         
         self.toggle_stt_button = QPushButton("STT Off")
         self.toggle_stt_button.setFixedSize(120, 40)
-        # Assign a unique object name for our STT button.
         self.toggle_stt_button.setObjectName("sttButton")
         
         self.toggle_tts_button = QPushButton("TTS On" if self.tts_enabled else "TTS Off")
@@ -311,12 +313,10 @@ class ChatWindow(QMainWindow):
         top_layout.addWidget(self.toggle_stt_button)
         top_layout.addWidget(self.toggle_tts_button)
         
-        # Single toggle button for switching playback location
         self.toggle_playback_button = QPushButton("BACK PLAY")
         self.toggle_playback_button.setFixedSize(120, 40)
         top_layout.addWidget(self.toggle_playback_button)
         
-        # Theme toggle button
         self.theme_toggle = QPushButton()
         self.theme_toggle.setFixedSize(45, 45)
         self.theme_toggle.setIcon(QIcon("/home/jack/humptyprompty/frontend/icons/dark_mode_24dp_E8EAED.svg"))
@@ -336,7 +336,6 @@ class ChatWindow(QMainWindow):
         
         layout.addWidget(self.top_widget)
         
-        # Connect button actions
         self.toggle_stt_button.clicked.connect(self.toggle_stt)
         self.toggle_tts_button.clicked.connect(self.toggle_tts)
         self.toggle_playback_button.clicked.connect(self.toggle_playback)
@@ -415,7 +414,7 @@ class ChatWindow(QMainWindow):
         )
         self.ws_client.message_received.connect(self.handle_message)
         self.ws_client.stt_text_received.connect(self.handle_stt_text)
-        self.ws_client.stt_state_received.connect(self.handle_stt_state)  # Connect new signal
+        self.ws_client.stt_state_received.connect(self.handle_stt_state)
         self.ws_client.connection_status.connect(self.handle_connection_status)
         self.ws_client.audio_received.connect(self.on_audio_received)
         self.ws_client.tts_state_changed.connect(self.handle_tts_state_changed)
@@ -453,9 +452,10 @@ class ChatWindow(QMainWindow):
                 logger.info(f"State change to Idle - Buffer size: {buffer_size}, End of stream: {is_end_of_stream}")
                 if buffer_size == 0 and is_end_of_stream:
                     logger.info("Audio playback finished, sending playback-complete message to server...")
-                    asyncio.run(self.ws_client.ws.send(json.dumps({
-                        "action": "playback-complete"
-                    })))
+                    asyncio.run_coroutine_threadsafe(
+                        self.ws_client.ws.send(json.dumps({"action": "playback-complete"})),
+                        self.ws_client.loop
+                    )
                     logger.info("Playback-complete message sent to server")
                     self.audio_device.end_of_stream = False
                     self.audio_device.last_read_empty = False
@@ -515,7 +515,6 @@ class ChatWindow(QMainWindow):
             QLabel {{
                 color: {COLORS['text_primary']};
             }}
-            /* Specific rule for the STT button when listening */
             QPushButton#sttButton[isListening="true"] {{
                 background-color: red !important;
                 color: white !important;
@@ -575,7 +574,11 @@ class ChatWindow(QMainWindow):
             try:
                 self.finalize_assistant_bubble()
                 self.add_message(text, True)
-                asyncio.run(self.ws_client.send_message(text))
+                # Schedule the send_message coroutine on the WebSocketClient's event loop
+                asyncio.run_coroutine_threadsafe(
+                    self.ws_client.send_message(text),
+                    self.ws_client.loop
+                )
                 self.text_input.clear()
             except Exception as e:
                 logger.error(f"Error sending message: {e}")
@@ -617,7 +620,6 @@ class ChatWindow(QMainWindow):
         self.toggle_tts_button.setText("TTS On" if is_enabled else "TTS Off")
 
     def handle_stt_state(self, is_listening: bool):
-        # This handler is connected to stt_state_received and updates the actual listening state.
         self.stt_listening = is_listening
         self.update_stt_button_style()
 
@@ -665,7 +667,6 @@ class ChatWindow(QMainWindow):
         self.text_input.setFixedHeight(int(new_height))
 
     def update_stt_button_style(self):
-        # Update the STT button by setting its "isListening" property based on the actual listening state.
         self.toggle_stt_button.setProperty("isListening", "true" if self.stt_listening else "false")
         self.toggle_stt_button.style().unpolish(self.toggle_stt_button)
         self.toggle_stt_button.style().polish(self.toggle_stt_button)
@@ -674,21 +675,24 @@ class ChatWindow(QMainWindow):
         self.is_toggling_stt = True
         try:
             if not self.stt_enabled:
-                # Use WebSocket to start STT and initiate listening
                 if self.ws_client.ws:
-                    asyncio.run(self.ws_client.ws.send(json.dumps({"action": "start-stt"})))
+                    asyncio.run_coroutine_threadsafe(
+                        self.ws_client.ws.send(json.dumps({"action": "start-stt"})),
+                        self.ws_client.loop
+                    )
                     self.stt_enabled = True
                 else:
                     logger.error("WebSocket is not connected; cannot start STT.")
             else:
-                # Use WebSocket to pause STT and stop listening
                 if self.ws_client.ws:
-                    asyncio.run(self.ws_client.ws.send(json.dumps({"action": "pause-stt"})))
+                    asyncio.run_coroutine_threadsafe(
+                        self.ws_client.ws.send(json.dumps({"action": "pause-stt"})),
+                        self.ws_client.loop
+                    )
                     self.stt_enabled = False
                 else:
                     logger.error("WebSocket is not connected; cannot pause STT.")
             self.toggle_stt_button.setText("STT On" if self.stt_enabled else "STT Off")
-            # Do not update style directly here; wait for backend broadcast to update self.stt_listening.
         except Exception as e:
             logger.error(f"Error toggling STT: {e}")
         finally:
@@ -724,7 +728,6 @@ class ChatWindow(QMainWindow):
             new_state = resp.json().get("playback_location", None)
             if new_state:
                 self.playback_location = new_state
-                # Now show the actual state on the button
                 if self.playback_location == "backend":
                     self.toggle_playback_button.setText("BACK PLAY")
                 else:
