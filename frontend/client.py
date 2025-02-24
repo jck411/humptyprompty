@@ -240,7 +240,6 @@ class ChatWindow(QMainWindow):
         self.assistant_bubble_in_progress = None
 
         # Default playback location is backend.
-        # Button text will show the toggle target (i.e. "FRONT PLAY" when currently backend).
         self.playback_location = "backend"
         
         # New variable to hold the actual listening state from backend
@@ -251,7 +250,7 @@ class ChatWindow(QMainWindow):
         self.setup_websocket()
         self.setup_audio()
         self.apply_styling()
-        
+        self.load_playback_state()  # Load initial playback state from the config
         self.theme_toggle.setIcon(QIcon("/home/jack/humptyprompty/frontend/icons/light_mode_24dp_E8EAED.svg"))
 
     def init_states(self):
@@ -266,6 +265,23 @@ class ChatWindow(QMainWindow):
         self.is_toggling_tts = False
         self.stt_enabled = False  # Global STT flag (when user toggles STT)
         self.is_toggling_stt = False
+
+    def load_playback_state(self):
+        try:
+            resp = requests.get(f"{HTTP_BASE_URL}/api/playback-location")
+            resp.raise_for_status()
+            new_state = resp.json().get("playback_location", None)
+            if new_state:
+                self.playback_location = new_state
+                if self.playback_location == "backend":
+                    self.toggle_playback_button.setText("BACK PLAY")
+                else:
+                    self.toggle_playback_button.setText("FRONT PLAY")
+                logger.info(f"Loaded playback location: {self.playback_location}")
+            else:
+                logger.error("No playback_location returned from GET /api/playback-location")
+        except Exception as e:
+            logger.error(f"Error loading playback location: {e}")
 
     def setup_ui(self):
         main_widget = QWidget()
@@ -296,7 +312,7 @@ class ChatWindow(QMainWindow):
         top_layout.addWidget(self.toggle_tts_button)
         
         # Single toggle button for switching playback location
-        self.toggle_playback_button = QPushButton("FRONT PLAY")
+        self.toggle_playback_button = QPushButton("BACK PLAY")
         self.toggle_playback_button.setFixedSize(120, 40)
         top_layout.addWidget(self.toggle_playback_button)
         
@@ -701,6 +717,24 @@ class ChatWindow(QMainWindow):
         finally:
             self.is_toggling_tts = False
 
+    def toggle_playback(self):
+        try:
+            resp = requests.post(f"{HTTP_BASE_URL}/api/toggle-playback-location")
+            resp.raise_for_status()
+            new_state = resp.json().get("playback_location", None)
+            if new_state:
+                self.playback_location = new_state
+                # Now show the actual state on the button
+                if self.playback_location == "backend":
+                    self.toggle_playback_button.setText("BACK PLAY")
+                else:
+                    self.toggle_playback_button.setText("FRONT PLAY")
+                logger.info(f"Playback location toggled to {self.playback_location}")
+            else:
+                logger.error("No playback_location returned from toggle endpoint")
+        except Exception as e:
+            logger.error(f"Error toggling playback location: {e}")
+
     def stop_tts_and_generation(self):
         try:
             requests.post(f"{HTTP_BASE_URL}/api/stop-tts").raise_for_status()
@@ -772,24 +806,6 @@ class ChatWindow(QMainWindow):
             self.centralWidget().layout().setContentsMargins(5, 5, 5, 5)
         self.show()
         QTimer.singleShot(100, self.auto_scroll_chat)
-
-    # --- Toggle playback method ---
-    def toggle_playback(self):
-        try:
-            resp = requests.post(f"{HTTP_BASE_URL}/api/toggle-playback-location")
-            resp.raise_for_status()
-            new_state = resp.json().get("playback_location", None)
-            if new_state:
-                self.playback_location = new_state
-                if self.playback_location == "backend":
-                    self.toggle_playback_button.setText("FRONT PLAY")
-                else:
-                    self.toggle_playback_button.setText("BACK PLAY")
-                logger.info(f"Playback location toggled to {self.playback_location}")
-            else:
-                logger.error("No playback_location returned from toggle endpoint")
-        except Exception as e:
-            logger.error(f"Error toggling playback location: {e}")
 
 # ----------------------- MAIN -----------------------
 if __name__ == '__main__':

@@ -4,8 +4,7 @@ from backend.config.config import CONFIG
 from backend.stt.azure_stt import stt_instance, stt_config
 from backend.stt.base import STTState
 from backend.tts.processor import audio_player
-from backend.endpoints.state import GEN_STOP_EVENT
-from backend.endpoints.state import TTS_STOP_EVENT
+from backend.endpoints.state import GEN_STOP_EVENT, TTS_STOP_EVENT
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api")
@@ -69,6 +68,16 @@ async def toggle_stt_enabled():
         print(f"Error toggling STT: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to toggle STT enabled state: {str(e)}")
 
+@router.post("/toggle-tts")
+async def toggle_tts():
+    try:
+        current_status = CONFIG["GENERAL_AUDIO"]["TTS_ENABLED"]
+        CONFIG["GENERAL_AUDIO"]["TTS_ENABLED"] = not current_status
+        return {"tts_enabled": CONFIG["GENERAL_AUDIO"]["TTS_ENABLED"]}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to toggle TTS: {str(e)}")
+
+# Re-added endpoint for toggling audio playback
 @router.post("/toggle-audio")
 async def toggle_audio_playback():
     try:
@@ -81,14 +90,17 @@ async def toggle_audio_playback():
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to toggle audio playback: {str(e)}")
 
-@router.post("/toggle-tts")
-async def toggle_tts():
-    try:
-        current_status = CONFIG["GENERAL_AUDIO"]["TTS_ENABLED"]
-        CONFIG["GENERAL_AUDIO"]["TTS_ENABLED"] = not current_status
-        return {"tts_enabled": CONFIG["GENERAL_AUDIO"]["TTS_ENABLED"]}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to toggle TTS: {str(e)}")
+# Endpoint to get the current playback location from the configuration
+@router.get("/playback-location")
+async def get_playback_location():
+    return {"playback_location": CONFIG["GENERAL_AUDIO"]["TTS_PLAYBACK_LOCATION"]}
+
+@router.post("/toggle-playback-location")
+async def toggle_playback_location():
+    current = CONFIG["GENERAL_AUDIO"]["TTS_PLAYBACK_LOCATION"]
+    # Toggle between frontend and backend
+    CONFIG["GENERAL_AUDIO"]["TTS_PLAYBACK_LOCATION"] = "frontend" if current == "backend" else "backend"
+    return {"playback_location": CONFIG["GENERAL_AUDIO"]["TTS_PLAYBACK_LOCATION"]}
 
 @router.post("/stop-tts")
 async def stop_tts():
@@ -108,13 +120,5 @@ async def stop_generation():
     Manually set the global GEN_STOP_EVENT.
     Any ongoing streaming text generation will stop soon after it checks the event.
     """
-
     GEN_STOP_EVENT.set()
     return {"detail": "Generation stop event triggered. Ongoing text generation will exit soon."}
-
-@router.post("/toggle-playback-location")
-async def toggle_playback_location():
-    current = CONFIG["GENERAL_AUDIO"]["TTS_PLAYBACK_LOCATION"]
-    # Toggle between frontend and backend
-    CONFIG["GENERAL_AUDIO"]["TTS_PLAYBACK_LOCATION"] = "frontend" if current == "backend" else "backend"
-    return {"playback_location": CONFIG["GENERAL_AUDIO"]["TTS_PLAYBACK_LOCATION"]}
