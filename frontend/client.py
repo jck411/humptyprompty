@@ -10,7 +10,7 @@ from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QScrollArea, QSizePolicy, QTextEdit, QFrame, QLabel
 )
-from PyQt6.QtCore import Qt, QTimer, QSize, QMutex, QMutexLocker, QIODevice, QThread, pyqtSignal
+from PyQt6.QtCore import Qt, QTimer, QSize, QMutex, QMutexLocker, QIODevice, pyqtSignal, QObject
 from PyQt6.QtGui import QColor, QPalette, QIcon
 from PyQt6.QtMultimedia import QAudioFormat, QAudioSink, QMediaDevices, QAudio
 
@@ -51,9 +51,9 @@ LIGHT_COLORS = {
 # Start with dark mode
 COLORS = DARK_COLORS
 
-# Logger setup
+# Logger setup - Set to WARNING to reduce logging overhead on less powerful machines
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
+logger.setLevel(logging.WARNING)
 ch = logging.StreamHandler()
 formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 ch.setFormatter(formatter)
@@ -88,8 +88,8 @@ class CustomTextEdit(QTextEdit):
         else:
             super().keyPressEvent(event)
 
-# ----------------------- WEBSOCKET CLIENT -----------------------
-class WebSocketClient(QThread):
+# ----------------------- ASYNC WEBSOCKET CLIENT (Refactored) -----------------------
+class AsyncWebSocketClient(QObject):
     message_received = pyqtSignal(str)
     stt_text_received = pyqtSignal(str)
     stt_state_received = pyqtSignal(bool)  # Signal for STT listening state
@@ -97,16 +97,14 @@ class WebSocketClient(QThread):
     audio_received = pyqtSignal(bytes)
     tts_state_changed = pyqtSignal(bool)
 
-    def __init__(self, server_host, server_port, websocket_path, http_base_url):
+    def __init__(self, server_host, server_port, websocket_path):
         super().__init__()
         self.server_host = server_host
         self.server_port = server_port
         self.websocket_path = websocket_path
-        self.http_base_url = http_base_url
         self.ws = None
         self.running = True
         self.messages = []
-        self.loop = None  # This will hold our dedicated event loop
 
     async def connect(self):
         import websockets
@@ -114,20 +112,20 @@ class WebSocketClient(QThread):
         try:
             self.ws = await websockets.connect(ws_url)
             self.connection_status.emit(True)
-            logger.info(f"Frontend: WebSocket connected to {ws_url}")
+            logger.info(f"Connected to {ws_url}")
             while self.running:
                 try:
                     message = await self.ws.recv()
                     if isinstance(message, bytes):
                         if message.startswith(b'audio:'):
                             audio_data = message[len(b'audio:'):]
-                            logger.info(f"Frontend: Received audio chunk of size: {len(audio_data)} bytes")
+                            logger.info(f"Received audio chunk size: {len(audio_data)}")
                             self.audio_received.emit(message)
                         else:
-                            logger.warning(f"Frontend: Received binary message without audio prefix, size: {len(message)} bytes")
+                            logger.warning("Received binary message without audio prefix")
                             self.audio_received.emit(b'audio:' + message)
                     else:
-                        logger.info(f"Frontend: Received text message: {message[:100]}...")
+                        logger.info("Received text message")
                         try:
                             data = json.loads(message)
                             if data.get("type") == "stt_state":
@@ -137,12 +135,12 @@ class WebSocketClient(QThread):
                             elif "stt_text" in data:
                                 self.stt_text_received.emit(data["stt_text"])
                         except json.JSONDecodeError:
-                            logger.error(f"Frontend: Failed to parse JSON message: {message}")
+                            logger.error("Failed to parse JSON")
                 except Exception as e:
-                    logger.error(f"Frontend: Error processing WebSocket message: {e}")
+                    logger.error(f"Error processing WebSocket message: {e}")
                     break
         except Exception as e:
-            logger.error(f"Frontend: WebSocket connection error: {e}")
+            logger.error(f"WebSocket connection error: {e}")
         finally:
             self.connection_status.emit(False)
 
@@ -156,12 +154,6 @@ class WebSocketClient(QThread):
 
     def handle_assistant_message(self, message):
         self.messages.append({"sender": "assistant", "text": message})
-
-    def run(self):
-        # Create and set a dedicated event loop for this thread
-        self.loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(self.loop)
-        self.loop.run_until_complete(self.connect())
 
 # ----------------------- AUDIO SETUP -----------------------
 class QueueAudioDevice(QIODevice):
@@ -412,30 +404,28 @@ class ChatWindow(QMainWindow):
         self.stop_all_button.clicked.connect(lambda: asyncio.create_task(self.stop_tts_and_generation_async()))
 
     def setup_websocket(self):
-        self.ws_client = WebSocketClient(
-            SERVER_HOST, 
-            SERVER_PORT, 
-            WEBSOCKET_PATH, 
-            HTTP_BASE_URL
-        )
+        self.ws_client = AsyncWebSocketClient(SERVER_HOST, SERVER_PORT, WEBSOCKET_PATH)
         self.ws_client.message_received.connect(self.handle_message)
         self.ws_client.stt_text_received.connect(self.handle_stt_text)
         self.ws_client.stt_state_received.connect(self.handle_stt_state)
         self.ws_client.connection_status.connect(self.handle_connection_status)
         self.ws_client.audio_received.connect(self.on_audio_received)
         self.ws_client.tts_state_changed.connect(self.handle_tts_state_changed)
-        self.ws_client.start()
+        # Defer the connection until the event loop is running
+        QTimer.singleShot(0, lambda: asyncio.create_task(self.ws_client.connect()))
+
 
     def setup_audio(self):
         self.audio_sink, self.audio_device = setup_audio()
         self.audio_sink.stateChanged.connect(self.handle_audio_state_changed)
         self.audio_queue = asyncio.Queue()
+        # Increase timer interval to reduce CPU usage on less powerful machines
         self.audio_timer = QTimer()
-        self.audio_timer.setInterval(10)
+        self.audio_timer.setInterval(50)  # was 10
         self.audio_timer.timeout.connect(self.feed_audio_data)
         self.audio_timer.start()
         self.state_monitor_timer = QTimer()
-        self.state_monitor_timer.setInterval(100)
+        self.state_monitor_timer.setInterval(200)  # was 100
         self.state_monitor_timer.timeout.connect(self.check_audio_state)
         self.state_monitor_timer.start()
         logger.info("Audio setup completed with state monitoring")
@@ -458,10 +448,7 @@ class ChatWindow(QMainWindow):
                 logger.info(f"State change to Idle - Buffer size: {buffer_size}, End of stream: {is_end_of_stream}")
                 if buffer_size == 0 and is_end_of_stream:
                     logger.info("Audio playback finished, sending playback-complete message to server...")
-                    asyncio.run_coroutine_threadsafe(
-                        self.ws_client.ws.send(json.dumps({"action": "playback-complete"})),
-                        self.ws_client.loop
-                    )
+                    asyncio.create_task(self.ws_client.ws.send(json.dumps({"action": "playback-complete"})))
                     logger.info("Playback-complete message sent to server")
                     self.audio_device.end_of_stream = False
                     self.audio_device.last_read_empty = False
@@ -582,10 +569,7 @@ class ChatWindow(QMainWindow):
             try:
                 self.finalize_assistant_bubble()
                 self.add_message(text, True)
-                asyncio.run_coroutine_threadsafe(
-                    self.ws_client.send_message(text),
-                    self.ws_client.loop
-                )
+                asyncio.create_task(self.ws_client.send_message(text))
                 self.text_input.clear()
             except Exception as e:
                 logger.error(f"Error sending message: {e}")
@@ -683,19 +667,13 @@ class ChatWindow(QMainWindow):
         try:
             if not self.stt_enabled:
                 if self.ws_client.ws:
-                    asyncio.run_coroutine_threadsafe(
-                        self.ws_client.ws.send(json.dumps({"action": "start-stt"})),
-                        self.ws_client.loop
-                    )
+                    asyncio.create_task(self.ws_client.ws.send(json.dumps({"action": "start-stt"})))
                     self.stt_enabled = True
                 else:
                     logger.error("WebSocket is not connected; cannot start STT.")
             else:
                 if self.ws_client.ws:
-                    asyncio.run_coroutine_threadsafe(
-                        self.ws_client.ws.send(json.dumps({"action": "pause-stt"})),
-                        self.ws_client.loop
-                    )
+                    asyncio.create_task(self.ws_client.ws.send(json.dumps({"action": "pause-stt"})))
                     self.stt_enabled = False
                 else:
                     logger.error("WebSocket is not connected; cannot pause STT.")
@@ -765,9 +743,9 @@ class ChatWindow(QMainWindow):
         self.finalize_assistant_bubble()
 
     def on_audio_received(self, pcm_data: bytes):
-        logger.info(f"Frontend: Processing audio chunk of size: {len(pcm_data)} bytes")
+        logger.info(f"Processing audio chunk of size: {len(pcm_data)} bytes")
         if pcm_data == b'audio:' or len(pcm_data) == 0:
-            logger.info("Frontend: Received empty audio message, marking end of stream")
+            logger.info("Received empty audio message, marking end of stream")
             self.audio_queue.put_nowait(None)
             self.audio_device.mark_end_of_stream()
         else:
