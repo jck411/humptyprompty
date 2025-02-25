@@ -10,48 +10,168 @@ from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QScrollArea, QSizePolicy, QTextEdit, QFrame, QLabel
 )
-from PyQt6.QtCore import Qt, QTimer, QSize, QMutex, QMutexLocker, QIODevice, pyqtSignal, QObject
-from PyQt6.QtGui import QColor, QPalette, QIcon
-from PyQt6.QtMultimedia import QAudioFormat, QAudioSink, QMediaDevices, QAudio
+from PyQt6.QtCore import (
+    Qt, QTimer, QSize, QMutex, QMutexLocker, QIODevice, pyqtSignal, QObject
+)
+from PyQt6.QtGui import (
+    QColor, QPalette, QIcon
+)
+from PyQt6.QtMultimedia import (
+    QAudioFormat, QAudioSink, QMediaDevices, QAudio
+)
 
 # qasync integration
 from qasync import QEventLoop
 
-# ----------------------- CONFIGURATION -----------------------
+# -----------------------------------------------------------------------------
+#                               THEMING & COLORS
+# -----------------------------------------------------------------------------
+DARK_COLORS = {
+    "background": "#1a1b26", 
+    "user_bubble": "#3b4261", 
+    "assistant_bubble": "transparent", 
+    "text_primary": "#a9b1d6", 
+    "text_secondary": "#565f89", 
+    "button_primary": "#7aa2f7", 
+    "button_hover": "#3d59a1", 
+    "button_pressed": "#2ac3de", 
+    "input_background": "#24283b", 
+    "input_border": "#414868"      
+}
+
+LIGHT_COLORS = {
+    "background": "#E8EEF5",
+    "user_bubble": "#D0D7E1", 
+    "assistant_bubble": "#F7F9FB", 
+    "text_primary": "#1C1E21", 
+    "text_secondary": "#65676B", 
+    "button_primary": "#0D8BD9", 
+    "button_hover": "#0A6CA8", 
+    "button_pressed": "#084E7A", 
+    "input_background": "#FFFFFF", 
+    "input_border": "#D3D7DC"       
+}
+
+
+def generate_main_stylesheet(colors):
+    """
+    Return the main stylesheet based on the provided color scheme.
+    Added a Raspberry Pi-friendly default font (DejaVu Sans) with fallback.
+    """
+    return f"""
+    /* Global font selection: DejaVu Sans, fallback to sans-serif */
+    QWidget {{
+        font-family: 'DejaVu Sans', 'sans-serif';
+        background-color: {colors['background']};
+    }}
+    QMainWindow {{
+        background-color: {colors['background']};
+    }}
+    QScrollArea {{
+        border: none;
+        background-color: {colors['background']};
+    }}
+    QScrollBar:vertical {{
+        border: none;
+        background: {colors['background']};
+        width: 10px;
+        margin: 0;
+    }}
+    QScrollBar::handle:vertical {{
+        background: {colors['input_border']};
+        border-radius: 5px;
+        min-height: 20px;
+    }}
+    QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
+        height: 0;
+        width: 0;
+        background: none;
+        border: none;
+    }}
+    QTextEdit {{
+        border: 1px solid {colors['input_border']};
+        border-radius: 20px;
+        padding: 10px;
+        background-color: {colors['input_background']};
+        color: {colors['text_primary']};
+        font-size: 14px;
+    }}
+    QPushButton {{
+        border: none;
+        border-radius: 25px;
+        background-color: {colors['button_primary']};
+        color: white;
+        padding: 5px;
+        font-weight: bold;
+        font-size: 13px;
+    }}
+    QPushButton:hover {{
+        background-color: {colors['button_hover']};
+    }}
+    QPushButton:pressed {{
+        background-color: {colors['button_pressed']};
+    }}
+    QLabel {{
+        color: {colors['text_primary']};
+        font-size: 14px;
+    }}
+    QPushButton#sttButton[isListening="true"] {{
+        background-color: red !important;
+        color: white !important;
+        border: none;
+        border-radius: 10px;
+    }}
+    """
+
+def get_message_bubble_stylesheet(is_user, colors):
+    """
+    Return the stylesheet for a message bubble.
+    For user messages, we use a subtle bubble; for assistant messages, no background bubble.
+    """
+    if is_user:
+        return f"""
+            QFrame#messageBubble {{
+                background-color: {colors['user_bubble']};
+                border-radius: 15px;
+                margin: 5px 50px 5px 5px;
+                padding: 5px;
+            }}
+            QLabel {{
+                color: {colors['text_primary']};
+                font-size: 14px;
+                background-color: transparent;
+            }}
+        """
+    else:
+        return f"""
+            QFrame#messageBubble {{
+                background-color: transparent;
+                margin: 5px 5px 5px 50px;
+                padding: 5px;
+            }}
+            QLabel {{
+                color: {colors['text_primary']};
+                font-size: 14px;
+                background-color: transparent;
+            }}
+        """
+
+
+# -----------------------------------------------------------------------------
+#                            CONFIGURATION
+# -----------------------------------------------------------------------------
 SERVER_HOST = "192.168.1.226"  # Adjust as needed
 SERVER_PORT = 8000
 WEBSOCKET_PATH = "/ws/chat"
 HTTP_BASE_URL = f"http://{SERVER_HOST}:{SERVER_PORT}"
 
-# Define color schemes
-DARK_COLORS = {
-    "background": "#2C2F33",
-    "user_bubble": "#7289DA",
-    "assistant_bubble": "#99AAB5",
-    "text_primary": "#FFFFFF",
-    "text_secondary": "#99AAB5",
-    "button_primary": "#7289DA",
-    "button_hover": "#677BC4",
-    "button_pressed": "#5B6EAE",
-    "input_background": "#23272A",
-    "input_border": "#99AAB5"
-}
-LIGHT_COLORS = {
-    "background": "#F0F2F5",
-    "user_bubble": "#DCF8C6",
-    "assistant_bubble": "#E8E8E8",
-    "text_primary": "#000000",
-    "text_secondary": "#666666",
-    "button_primary": "#0D8BD9",
-    "button_hover": "#0A6CA8",
-    "button_pressed": "#084E7A",
-    "input_background": "#FFFFFF",
-    "input_border": "#E0E0E0"
-}
 # Start with dark mode
 COLORS = DARK_COLORS
 
-# Logger setup - Set to WARNING to reduce logging overhead on less powerful machines
+
+# -----------------------------------------------------------------------------
+#                           LOGGER SETUP
+# -----------------------------------------------------------------------------
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.WARNING)
 ch = logging.StreamHandler()
@@ -59,7 +179,10 @@ formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s
 ch.setFormatter(formatter)
 logger.addHandler(ch)
 
-# ----------------------- COMPONENTS -----------------------
+
+# -----------------------------------------------------------------------------
+#                           COMPONENTS & UTILS
+# -----------------------------------------------------------------------------
 class MessageBubble(QFrame):
     def __init__(self, text, is_user=True):
         super().__init__()
@@ -75,12 +198,15 @@ class MessageBubble(QFrame):
     def update_text(self, new_text):
         self.label.setText(new_text)
 
+
 class CustomTextEdit(QTextEdit):
+    """
+    Sends the message on Enter (unless Shift is held).
+    """
     def __init__(self, parent=None):
         super().__init__(parent)
 
     def keyPressEvent(self, event):
-        # Send message on Enter (without Shift)
         if event.key() == Qt.Key.Key_Return and not (event.modifiers() & Qt.KeyboardModifier.ShiftModifier):
             main_window = self.window()
             if hasattr(main_window, "send_message"):
@@ -88,11 +214,14 @@ class CustomTextEdit(QTextEdit):
         else:
             super().keyPressEvent(event)
 
-# ----------------------- ASYNC WEBSOCKET CLIENT (Refactored) -----------------------
+
+# -----------------------------------------------------------------------------
+#                       ASYNC WEBSOCKET CLIENT
+# -----------------------------------------------------------------------------
 class AsyncWebSocketClient(QObject):
     message_received = pyqtSignal(str)
     stt_text_received = pyqtSignal(str)
-    stt_state_received = pyqtSignal(bool)  # Signal for STT listening state
+    stt_state_received = pyqtSignal(bool)
     connection_status = pyqtSignal(bool)
     audio_received = pyqtSignal(bytes)
     tts_state_changed = pyqtSignal(bool)
@@ -113,6 +242,7 @@ class AsyncWebSocketClient(QObject):
             self.ws = await websockets.connect(ws_url)
             self.connection_status.emit(True)
             logger.info(f"Connected to {ws_url}")
+
             while self.running:
                 try:
                     message = await self.ws.recv()
@@ -155,8 +285,14 @@ class AsyncWebSocketClient(QObject):
     def handle_assistant_message(self, message):
         self.messages.append({"sender": "assistant", "text": message})
 
-# ----------------------- AUDIO SETUP -----------------------
+
+# -----------------------------------------------------------------------------
+#                              AUDIO SETUP
+# -----------------------------------------------------------------------------
 class QueueAudioDevice(QIODevice):
+    """
+    QIODevice for buffering PCM audio data.
+    """
     def __init__(self):
         super().__init__()
         self.audio_buffer = bytearray()
@@ -193,7 +329,7 @@ class QueueAudioDevice(QIODevice):
             self.end_of_stream = True
             if len(self.audio_buffer) == 0:
                 self.last_read_empty = True
-                logger.info("Buffer already empty at end of stream mark")
+                logger.info("Buffer empty at end of stream mark")
 
     def clear_buffer(self):
         with QMutexLocker(self.mutex):
@@ -202,40 +338,44 @@ class QueueAudioDevice(QIODevice):
             self.last_read_empty = False
             logger.info("Audio buffer cleared and state reset")
 
+
 def setup_audio():
     audio_format = QAudioFormat()
     audio_format.setSampleRate(24000)
     audio_format.setChannelCount(1)
     audio_format.setSampleFormat(QAudioFormat.SampleFormat.Int16)
+
     device = QMediaDevices.defaultAudioOutput()
     if device is None:
         logger.error("Error: No audio output device found!")
+
     audio_sink = QAudioSink(device, audio_format)
     audio_sink.setVolume(1.0)
+
     audio_device = QueueAudioDevice()
     audio_device.open(QIODevice.OpenModeFlag.ReadOnly)
     audio_sink.start(audio_device)
     return audio_sink, audio_device
 
-# ----------------------- MAIN CHAT WINDOW -----------------------
+
+# -----------------------------------------------------------------------------
+#                           MAIN CHAT WINDOW
+# -----------------------------------------------------------------------------
 class ChatWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Modern Chat Interface")
-        self.setMinimumSize(800, 600)
         
-        # Create one central widget and main layout
+        # Central widget & main layout
         main_widget = QWidget()
         self.setCentralWidget(main_widget)
         self.main_layout = QVBoxLayout(main_widget)
         self.main_layout.setContentsMargins(5, 5, 5, 5)
         self.main_layout.setSpacing(2)
-
-        # Kiosk mode
-        self.is_kiosk_mode = False
-        self.normal_window_flags = self.windowFlags()
         
-        # Dark mode starts enabled
+        self.setWindowTitle("Modern Chat Interface")
+        self.setMinimumSize(800, 600)
+        
+        # Default: dark mode
         self.is_dark_mode = True
         global COLORS
         COLORS = DARK_COLORS
@@ -244,28 +384,34 @@ class ChatWindow(QMainWindow):
         self.assistant_text_in_progress = ""
         self.assistant_bubble_in_progress = None
 
-        # Default playback location is backend.
+        # Default playback location
         self.playback_location = "backend"
-        
-        # Variable for the actual listening state from backend
-        self.stt_listening = False  
-        
-        # Setup UI components
+
+        # STT states
+        self.stt_listening = False
+        self.stt_enabled = False
+        self.is_toggling_stt = False
+
+        # UI components
         self.setup_top_buttons_layout()
         self.setup_chat_area_layout()
         self.setup_input_area_layout()
-        
+
+        # Websocket + audio
         self.setup_websocket()
         self.setup_audio()
         self.apply_styling()
-        
-        # Schedule async initialization tasks once the event loop is running.
+
+        # Async tasks
         QTimer.singleShot(0, lambda: asyncio.create_task(self._init_states_async()))
         QTimer.singleShot(0, lambda: asyncio.create_task(self.load_playback_state_async()))
-        
-        self.theme_toggle.setIcon(QIcon("/home/jack/humptyprompty/frontend/icons/light_mode_24dp_E8EAED.svg"))
+
+        self.theme_toggle.setIcon(QIcon("/home/jack/humptyprompty/frontend/icons/light_mode.svg"))
 
     async def _init_states_async(self):
+        """
+        Get the initial TTS state from server.
+        """
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.post(f"{HTTP_BASE_URL}/api/toggle-tts") as resp:
@@ -275,12 +421,13 @@ class ChatWindow(QMainWindow):
         except Exception as e:
             logger.error(f"Error getting initial TTS state: {e}")
             self.tts_enabled = False
-        
+
         self.is_toggling_tts = False
-        self.stt_enabled = False  # Global STT flag (when user toggles STT)
-        self.is_toggling_stt = False
 
     async def load_playback_state_async(self):
+        """
+        Get the initial playback state (front/back).
+        """
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.get(f"{HTTP_BASE_URL}/api/playback-location") as resp:
@@ -301,20 +448,30 @@ class ChatWindow(QMainWindow):
         top_layout.setContentsMargins(0, 5, 0, 0)
         top_layout.setSpacing(5)
         
+        # Left-aligned container
+        left_buttons = QWidget()
+        left_layout = QHBoxLayout(left_buttons)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(5)
+        
         self.toggle_stt_button = QPushButton("STT Off")
         self.toggle_stt_button.setFixedSize(120, 40)
         self.toggle_stt_button.setObjectName("sttButton")
-        
+
         self.toggle_tts_button = QPushButton("TTS On" if getattr(self, 'tts_enabled', False) else "TTS Off")
         self.toggle_tts_button.setFixedSize(120, 40)
 
-        top_layout.addWidget(self.toggle_stt_button)
-        top_layout.addWidget(self.toggle_tts_button)
-        
         self.toggle_playback_button = QPushButton("BACK PLAY")
         self.toggle_playback_button.setFixedSize(120, 40)
-        top_layout.addWidget(self.toggle_playback_button)
-        
+
+        left_layout.addWidget(self.toggle_stt_button)
+        left_layout.addWidget(self.toggle_tts_button)
+        left_layout.addWidget(self.toggle_playback_button)
+        left_layout.addStretch()
+
+        top_layout.addWidget(left_buttons, stretch=1)
+
+        # Theme toggle on the right
         self.theme_toggle = QPushButton()
         self.theme_toggle.setFixedSize(45, 45)
         self.theme_toggle.setIcon(QIcon("/home/jack/humptyprompty/frontend/icons/dark_mode_24dp_E8EAED.svg"))
@@ -331,10 +488,11 @@ class ChatWindow(QMainWindow):
             }
         """)
         top_layout.addWidget(self.theme_toggle)
-        
+
         self.main_layout.addWidget(self.top_widget)
-        
-        self.toggle_stt_button.clicked.connect(self.toggle_stt)
+
+        # Connect buttons using asyncio.create_task for async handling
+        self.toggle_stt_button.clicked.connect(lambda: asyncio.create_task(self.toggle_stt()))
         self.toggle_tts_button.clicked.connect(lambda: asyncio.create_task(self.toggle_tts_async()))
         self.toggle_playback_button.clicked.connect(lambda: asyncio.create_task(self.toggle_playback_async()))
 
@@ -362,7 +520,7 @@ class ChatWindow(QMainWindow):
         scroll_palette = scroll.palette()
         scroll_palette.setColor(QPalette.ColorRole.Window, QColor(COLORS['background']))
         scroll.setPalette(scroll_palette)
-        
+
         self.main_layout.addWidget(scroll, stretch=1)
 
     def setup_input_area_layout(self):
@@ -411,23 +569,25 @@ class ChatWindow(QMainWindow):
         self.ws_client.connection_status.connect(self.handle_connection_status)
         self.ws_client.audio_received.connect(self.on_audio_received)
         self.ws_client.tts_state_changed.connect(self.handle_tts_state_changed)
-        # Defer the connection until the event loop is running
         QTimer.singleShot(0, lambda: asyncio.create_task(self.ws_client.connect()))
-
 
     def setup_audio(self):
         self.audio_sink, self.audio_device = setup_audio()
         self.audio_sink.stateChanged.connect(self.handle_audio_state_changed)
         self.audio_queue = asyncio.Queue()
-        # Increase timer interval to reduce CPU usage on less powerful machines
+
+        # Timer to feed audio data
         self.audio_timer = QTimer()
-        self.audio_timer.setInterval(50)  # was 10
+        self.audio_timer.setInterval(50)
         self.audio_timer.timeout.connect(self.feed_audio_data)
         self.audio_timer.start()
+
+        # Timer to check for idle states
         self.state_monitor_timer = QTimer()
-        self.state_monitor_timer.setInterval(200)  # was 100
+        self.state_monitor_timer.setInterval(200)
         self.state_monitor_timer.timeout.connect(self.check_audio_state)
         self.state_monitor_timer.start()
+
         logger.info("Audio setup completed with state monitoring")
 
     def check_audio_state(self):
@@ -454,67 +614,7 @@ class ChatWindow(QMainWindow):
                     self.audio_device.last_read_empty = False
 
     def apply_styling(self):
-        self.setStyleSheet(f"""
-            QMainWindow {{
-                background-color: {COLORS['background']};
-            }}
-            QScrollArea {{
-                border: none;
-                background-color: {COLORS['background']};
-            }}
-            QScrollBar:vertical {{
-                border: none;
-                background: {COLORS['background']};
-                width: 10px;
-                margin: 0;
-            }}
-            QScrollBar::handle:vertical {{
-                background: {COLORS['input_border']};
-                border-radius: 5px;
-                min-height: 20px;
-            }}
-            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
-                height: 0;
-                width: 0;
-                background: none;
-                border: none;
-            }}
-            QWidget {{
-                background-color: {COLORS['background']};
-            }}
-            QTextEdit {{
-                border: 1px solid {COLORS['input_border']};
-                border-radius: 20px;
-                padding: 10px;
-                background-color: {COLORS['input_background']};
-                color: {COLORS['text_primary']};
-                font-size: 14px;
-            }}
-            QPushButton {{
-                border: none;
-                border-radius: 25px;
-                background-color: {COLORS['button_primary']};
-                color: white;
-                padding: 5px;
-                font-weight: bold;
-                font-size: 13px;
-            }}
-            QPushButton:hover {{
-                background-color: {COLORS['button_hover']};
-            }}
-            QPushButton:pressed {{
-                background-color: {COLORS['button_pressed']};
-            }}
-            QLabel {{
-                color: {COLORS['text_primary']};
-            }}
-            QPushButton#sttButton[isListening="true"] {{
-                background-color: red !important;
-                color: white !important;
-                border: none;
-                border-radius: 10px;
-            }}
-        """)
+        self.setStyleSheet(generate_main_stylesheet(COLORS))
         palette = self.text_input.palette()
         palette.setColor(QPalette.ColorRole.PlaceholderText, QColor(COLORS['text_secondary']))
         self.text_input.setPalette(palette)
@@ -523,44 +623,27 @@ class ChatWindow(QMainWindow):
         self.is_dark_mode = not self.is_dark_mode
         global COLORS
         COLORS = DARK_COLORS if self.is_dark_mode else LIGHT_COLORS
-        icon_path = ("/home/jack/humptyprompty/frontend/icons/light_mode_24dp_E8EAED.svg" 
-                     if self.is_dark_mode 
-                     else "/home/jack/humptyprompty/frontend/icons/dark_mode_24dp_E8EAED.svg")
+
+        icon_path = (
+            "/home/jack/humptyprompty/frontend/icons/light_mode.svg"
+            if self.is_dark_mode
+            else "/home/jack/humptyprompty/frontend/icons/dark_mode.svg"
+        )
         self.theme_toggle.setIcon(QIcon(icon_path))
+
+        # Update background on chat & scroll
         self.chat_area.setStyleSheet(f"background-color: {COLORS['background']};")
         scroll_area = self.findChild(QScrollArea)
         scroll_area.setStyleSheet(f"background-color: {COLORS['background']};")
+
+        # Update existing bubbles
         for i in range(self.chat_layout.count()):
             widget = self.chat_layout.itemAt(i).widget()
             if widget and widget.__class__.__name__ == "MessageBubble":
                 is_user = widget.property("isUser")
-                if is_user:
-                    widget.setStyleSheet(f"""
-                        QFrame#messageBubble {{
-                            background-color: {COLORS['user_bubble']};
-                            border-radius: 15px;
-                            margin: 5px 50px 5px 5px;
-                            padding: 5px;
-                        }}
-                        QLabel {{
-                            color: {COLORS['text_primary']};
-                            font-size: 14px;
-                            background-color: transparent;
-                        }}
-                    """)
-                else:
-                    widget.setStyleSheet(f"""
-                        QFrame#messageBubble {{
-                            background-color: {COLORS['background']};
-                            margin: 5px 5px 5px 50px;
-                            padding: 5px;
-                        }}
-                        QLabel {{
-                            color: {COLORS['text_primary']};
-                            font-size: 14px;
-                            background-color: transparent;
-                        }}
-                    """)
+                widget.setStyleSheet(get_message_bubble_stylesheet(is_user, COLORS))
+
+        # Finally apply the updated stylesheet
         self.apply_styling()
 
     def send_message(self):
@@ -577,18 +660,7 @@ class ChatWindow(QMainWindow):
     def handle_message(self, token):
         if not self.assistant_bubble_in_progress:
             self.assistant_bubble_in_progress = MessageBubble("", is_user=False)
-            self.assistant_bubble_in_progress.setStyleSheet(f"""
-                QFrame#messageBubble {{
-                    background-color: {COLORS['background']};
-                    margin: 5px 5px 5px 50px;
-                    padding: 5px;
-                }}
-                QLabel {{
-                    color: {COLORS['text_primary']};
-                    font-size: 14px;
-                    background-color: transparent;
-                }}
-            """)
+            self.assistant_bubble_in_progress.setStyleSheet(get_message_bubble_stylesheet(False, COLORS))
             self.chat_layout.insertWidget(self.chat_layout.count() - 1, self.assistant_bubble_in_progress)
         self.assistant_text_in_progress += token
         self.assistant_bubble_in_progress.update_text(self.assistant_text_in_progress)
@@ -616,33 +688,7 @@ class ChatWindow(QMainWindow):
 
     def add_message(self, text, is_user):
         bubble = MessageBubble(text, is_user)
-        if is_user:
-            bubble.setStyleSheet(f"""
-                QFrame#messageBubble {{
-                    background-color: {COLORS['user_bubble']};
-                    border-radius: 15px;
-                    margin: 5px 50px 5px 5px;
-                    padding: 5px;
-                }}
-                QLabel {{
-                    color: {COLORS['text_primary']};
-                    font-size: 14px;
-                    background-color: transparent;
-                }}
-            """)
-        else:
-            bubble.setStyleSheet(f"""
-                QFrame#messageBubble {{
-                    background-color: {COLORS['background']};
-                    margin: 5px 5px 5px 50px;
-                    padding: 5px;
-                }}
-                QLabel {{
-                    color: {COLORS['text_primary']};
-                    font-size: 14px;
-                    background-color: transparent;
-                }}
-            """)
+        bubble.setStyleSheet(get_message_bubble_stylesheet(is_user, COLORS))
         self.chat_layout.insertWidget(self.chat_layout.count() - 1, bubble)
         self.auto_scroll_chat()
 
@@ -662,18 +708,22 @@ class ChatWindow(QMainWindow):
         self.toggle_stt_button.style().unpolish(self.toggle_stt_button)
         self.toggle_stt_button.style().polish(self.toggle_stt_button)
 
-    def toggle_stt(self):
+    async def toggle_stt(self):
+        """
+        Asynchronously toggles the STT state by sending the appropriate command
+        to the server over the WebSocket.
+        """
         self.is_toggling_stt = True
         try:
             if not self.stt_enabled:
                 if self.ws_client.ws:
-                    asyncio.create_task(self.ws_client.ws.send(json.dumps({"action": "start-stt"})))
+                    await self.ws_client.ws.send(json.dumps({"action": "start-stt"}))
                     self.stt_enabled = True
                 else:
                     logger.error("WebSocket is not connected; cannot start STT.")
             else:
                 if self.ws_client.ws:
-                    asyncio.create_task(self.ws_client.ws.send(json.dumps({"action": "pause-stt"})))
+                    await self.ws_client.ws.send(json.dumps({"action": "pause-stt"}))
                     self.stt_enabled = False
                 else:
                     logger.error("WebSocket is not connected; cannot pause STT.")
@@ -760,6 +810,7 @@ class ChatWindow(QMainWindow):
             logger.warning(f"Warning: Audio sink not active! Current state: {current_state}")
             self.audio_sink.start(self.audio_device)
             return
+
         try:
             while True:
                 try:
@@ -780,24 +831,12 @@ class ChatWindow(QMainWindow):
             logger.exception("Stack trace:")
 
     def keyPressEvent(self, event):
-        if event.key() == Qt.Key.Key_Escape:
-            self.toggle_kiosk_mode()
         super().keyPressEvent(event)
 
-    def toggle_kiosk_mode(self):
-        self.is_kiosk_mode = not self.is_kiosk_mode
-        if self.is_kiosk_mode:
-            self.normal_geometry = self.geometry()
-            self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
-            self.centralWidget().layout().setContentsMargins(5, 0, 5, 5)
-        else:
-            self.setWindowFlags(self.normal_window_flags)
-            self.setGeometry(self.normal_geometry)
-            self.centralWidget().layout().setContentsMargins(5, 5, 5, 5)
-        self.show()
-        QTimer.singleShot(100, self.auto_scroll_chat)
 
-# ----------------------- MAIN -----------------------
+# -----------------------------------------------------------------------------
+#                                 MAIN
+# -----------------------------------------------------------------------------
 if __name__ == '__main__':
     app = QApplication(sys.argv)
     loop = QEventLoop(app)

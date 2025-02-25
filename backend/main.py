@@ -50,6 +50,7 @@ async def handle_playback_complete():
     try:
         if CONFIG["GENERAL_AUDIO"]["STT_ENABLED"]:
             await stt_manager.start(update_global=False)
+            # Always broadcast state regardless of playback location
             await stt_manager.broadcast_state()
     except Exception as e:
         print(f"Error in playback complete handler: {e}")
