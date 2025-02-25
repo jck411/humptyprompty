@@ -43,9 +43,27 @@ pyaudio_instance = PyAudioSingleton()
 def shutdown():
     shutdown_audio(audio_player)
 
+# Move handle_playback_complete before setup_audio_player
+async def handle_playback_complete():
+    """Callback for when audio playback completes"""
+    print("Backend audio playback complete, resuming STT...")
+    try:
+        if CONFIG["GENERAL_AUDIO"]["STT_ENABLED"]:
+            await stt_manager.start(update_global=False)
+            await stt_manager.broadcast_state()
+    except Exception as e:
+        print(f"Error in playback complete handler: {e}")
+
+async def setup_audio_player():
+    """Set up audio player callback"""
+    print("Setting up audio player callback...")
+    audio_player.set_main_loop(asyncio.get_running_loop())
+    audio_player.on_playback_complete = handle_playback_complete
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     start_wake_word_thread()
+    await setup_audio_player()  # This now sets the main loop
     yield
     shutdown()
 
@@ -88,6 +106,7 @@ class STTManager:
             "is_listening": self.stt_instance.is_listening,
             "is_enabled": self.config["GENERAL_AUDIO"]["STT_ENABLED"]
         }
+        print(f"Broadcasting STT state: {message}")  # Add this debug line
         failed_ws = set()
         for ws in self.websocket_clients:
             try:
