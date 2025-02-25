@@ -66,6 +66,8 @@ async def lifespan(app: FastAPI):
     start_wake_word_thread()
     await setup_audio_player()  # This now sets the main loop
     yield
+    # Ensure STT tasks are stopped before shutdown
+    await stt_manager.stop()
     shutdown()
 
 app = FastAPI(lifespan=lifespan)
@@ -78,7 +80,7 @@ app.add_middleware(
 )
 
 # ------------------------------------------------------------------------------
-# Centralized STT Manager (Revised for Immediate Processing)
+# Centralized STT Manager (Revised for Immediate Processing with Async Concurrency)
 # ------------------------------------------------------------------------------
 class STTManager:
     def __init__(self, config, stt_instance):
@@ -118,6 +120,9 @@ class STTManager:
         finally:
             print("STTManager: Speech listener task ending")
 
+    async def _send_json(self, ws: WebSocket, message: Dict):
+        await ws.send_json(message)
+
     async def _broadcast_speech(self, recognized_text: str):
         """
         Broadcasts the recognized speech to all websocket clients immediately.
@@ -127,23 +132,14 @@ class STTManager:
             "stt_text": recognized_text
         }
         print(f"\nBroadcasting STT message: {message}")
-        failed_clients = set()
+        ws_list = list(self.websocket_clients)
+        tasks = [self._send_json(ws, message) for ws in ws_list]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
         
-        # Direct broadcast to all websocket clients
-        for ws in self.websocket_clients:
-            try:
-                print(f"Sending STT message to websocket...")
-                await ws.send_json(message)
-                print("STT message sent successfully")
-            except Exception as e:
-                print(f"STTManager: Error broadcasting speech to websocket: {str(e)}")
-                print(f"Error type: {type(e)}")
-                failed_clients.add(ws)
-        
-        # Clean up any failed clients
-        if failed_clients:
-            print(f"Removing {len(failed_clients)} failed websocket clients")
-            self.websocket_clients.difference_update(failed_clients)
+        for ws, result in zip(ws_list, results):
+            if isinstance(result, Exception):
+                print(f"STTManager: Error broadcasting speech to websocket: {result}")
+                self.websocket_clients.discard(ws)
 
     async def start(self, update_global: bool = True):
         """
@@ -201,14 +197,13 @@ class STTManager:
             "is_enabled": self.config["GENERAL_AUDIO"]["STT_ENABLED"]
         }
         print(f"Broadcasting STT state: {message}")
-        failed_ws = set()
-        for ws in self.websocket_clients:
-            try:
-                await ws.send_json(message)
-            except Exception as e:
-                print(f"STTManager: Error broadcasting state: {e}")
-                failed_ws.add(ws)
-        self.websocket_clients.difference_update(failed_ws)
+        ws_list = list(self.websocket_clients)
+        tasks = [self._send_json(ws, message) for ws in ws_list]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        for ws, result in zip(ws_list, results):
+            if isinstance(result, Exception):
+                print(f"STTManager: Error broadcasting state: {result}")
+                self.websocket_clients.discard(ws)
 
     async def cleanup(self, websocket: WebSocket):
         """
@@ -224,6 +219,20 @@ class STTManager:
             await websocket.send_json({"is_listening": False})
         except Exception as e:
             print(f"STTManager: Error sending cleanup state: {e}")
+
+    async def stop(self):
+        """
+        Stops the STT manager by clearing the listening event and cancelling
+        the listener task.
+        """
+        print("STTManager: Stopping STT")
+        self._listening_event.clear()
+        if self._listen_task and not self._listen_task.done():
+            self._listen_task.cancel()
+            try:
+                await self._listen_task
+            except asyncio.CancelledError:
+                print("STTManager: Listen task cancelled successfully")
 
 # Instantiate the STTManager
 stt_manager = STTManager(CONFIG, stt_instance)
