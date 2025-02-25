@@ -78,17 +78,21 @@ class AzureSTTProvider(BaseSTTProvider):
         if evt.result.text:
             print(f"\nAzure STT [Final]: {evt.result.text}")
             if self.is_listening and self.config.enabled:
-                self.speech_queue.put(evt.result.text)
+                # Don't clear interim results - just put the final result
+                self.speech_queue.put_nowait(f"[final] {evt.result.text}")
 
     def handle_interim_result(self, evt) -> None:
         if evt.result.text:
             print(f"\rAzure STT [Interim]: {evt.result.text}", end="", flush=True)
             if (self.is_listening and self.config.enabled and 
                 self.config.settings.get("INTERIM_RESULTS", False)):
-                self.speech_queue.put(f"(interim) {evt.result.text}")
+                # Don't clear previous interim results
+                self.speech_queue.put_nowait(f"(interim) {evt.result.text}")
 
     def _start_listening_impl(self) -> None:
         try:
+            print("Azure STT: Starting continuous recognition...")
+            # Don't clear queue here - let the speech listener handle it
             self.speech_recognizer.start_continuous_recognition()
         except Exception as e:
             print(f"Azure STT: Error starting recognition: {e}")
@@ -96,6 +100,7 @@ class AzureSTTProvider(BaseSTTProvider):
 
     def _stop_listening_impl(self) -> None:
         try:
+            print("Azure STT: Stopping continuous recognition...")
             self.speech_recognizer.stop_continuous_recognition()
         except Exception as e:
             print(f"Azure STT: Error stopping recognition: {e}")
@@ -103,6 +108,7 @@ class AzureSTTProvider(BaseSTTProvider):
 
     def _pause_listening_impl(self) -> None:
         try:
+            print("Azure STT: Pausing continuous recognition...")
             self.speech_recognizer.stop_continuous_recognition()
         except Exception as e:
             print(f"Azure STT: Error during pause: {e}")

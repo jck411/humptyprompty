@@ -79,29 +79,27 @@ async def process_streams(phrase_queue: asyncio.Queue, audio_queue: asyncio.Queu
         provider = CONFIG["TTS_MODELS"]["PROVIDER"].lower()
         if provider == "azure":
             from backend.tts.azuretts import azure_text_to_speech_processor
-            tts_processor = azure_text_to_speech_processor
+            tts_task = azure_text_to_speech_processor(phrase_queue, audio_queue, stop_event)
         elif provider == "openai":
             from backend.tts.openaitts import openai_text_to_speech_processor
-            tts_processor = openai_text_to_speech_processor
+            tts_task = openai_text_to_speech_processor(phrase_queue, audio_queue, stop_event)
         else:
-            raise ValueError(f"Unsupported TTS provider: {provider}")
+            logger.error(f"Unknown TTS provider: {provider}")
+            return
 
-        loop = asyncio.get_running_loop()
-
-        # Start the TTS processor
-        logger.debug("Starting TTS processor")
-        tts_task = asyncio.create_task(tts_processor(phrase_queue, audio_queue, stop_event))
-        
+        # If using backend playback, handle audio playback here
         if CONFIG["GENERAL_AUDIO"]["TTS_PLAYBACK_LOCATION"] == "backend":
-            logger.debug("Starting backend audio playback")
-            audio_player_task = asyncio.create_task(start_audio_player_async(audio_queue, loop, stop_event))
+            logger.debug("Using backend playback")
             try:
-                await asyncio.gather(tts_task, audio_player_task)
-            except asyncio.CancelledError:
-                logger.info("TTS tasks cancelled, ensuring proper cleanup")
-                if stop_event.is_set():
-                    logger.info("Stop event detected, resuming STT in backend mode")
-                    await stt_instance.start_listening()
+                audio_task = asyncio.create_task(
+                    start_audio_player_async(audio_queue, asyncio.get_running_loop(), stop_event)
+                )
+                await asyncio.gather(tts_task, audio_task)
+            except Exception as e:
+                logger.error(f"Error in backend playback: {e}")
+            finally:
+                # Let the audio_player handle STT resumption through its completion callback
+                pass
         else:
             logger.debug("Using frontend playback")
             await tts_task

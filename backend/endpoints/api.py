@@ -107,11 +107,8 @@ async def stop_tts():
     logger.info("Stop TTS requested")
     TTS_STOP_EVENT.set()
     
-    # If using backend playback, we need to handle STT resumption here
-    if CONFIG["GENERAL_AUDIO"]["TTS_PLAYBACK_LOCATION"] == "backend":
-        logger.info("Backend playback mode: Resuming STT after TTS stop")
-        await stt_instance.start_listening()
-    
+    # Let the audio_player completion callback handle STT resumption
+    # This ensures a single path for resuming STT and prevents race conditions
     return {"status": "success", "message": "TTS stopped"}
 
 @router.post("/stop-generation")

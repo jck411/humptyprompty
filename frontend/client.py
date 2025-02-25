@@ -173,7 +173,7 @@ COLORS = DARK_COLORS
 #                           LOGGER SETUP
 # -----------------------------------------------------------------------------
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.WARNING)
+logger.setLevel(logging.INFO)  # Changed from WARNING to INFO
 ch = logging.StreamHandler()
 formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 ch.setFormatter(formatter)
@@ -255,20 +255,33 @@ class AsyncWebSocketClient(QObject):
                             logger.warning("Received binary message without audio prefix")
                             self.audio_received.emit(b'audio:' + message)
                     else:
-                        logger.info("Received text message")
                         try:
                             data = json.loads(message)
-                            if data.get("type") == "stt_state":
-                                self.stt_state_received.emit(data.get("is_listening", False))
+                            logger.info(f"Received message: {data}")
+                            
+                            # Process STT messages first as highest priority
+                            msg_type = data.get("type")
+                            if msg_type == "stt":
+                                # Immediately relay STT text to UI
+                                stt_text = data.get("stt_text", "")
+                                logger.info(f"Processing STT text immediately: {stt_text}")
+                                self.stt_text_received.emit(stt_text)
+                            elif msg_type == "stt_state":
+                                # Update STT state
+                                is_listening = data.get("is_listening", False)
+                                logger.info(f"Updating STT state: listening = {is_listening}")
+                                self.stt_state_received.emit(is_listening)
                             elif "content" in data:
                                 self.message_received.emit(data["content"])
-                            elif "stt_text" in data:
-                                self.stt_text_received.emit(data["stt_text"])
+                            else:
+                                logger.warning(f"Unknown message type: {data}")
                         except json.JSONDecodeError:
-                            logger.error("Failed to parse JSON")
+                            logger.error("Failed to parse JSON message")
+                            logger.error(f"Raw message: {message}")
                 except Exception as e:
-                    logger.error(f"Error processing WebSocket message: {e}")
-                    break
+                    logger.error(f"WebSocket message processing error: {e}")
+                    await asyncio.sleep(0.1)  # Prevent tight loop on error
+                    continue
         except Exception as e:
             logger.error(f"WebSocket connection error: {e}")
         finally:
