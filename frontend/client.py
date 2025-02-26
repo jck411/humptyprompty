@@ -158,7 +158,7 @@ def get_message_bubble_stylesheet(is_user, colors):
 
 
 # -----------------------------------------------------------------------------
-#                            CONFIGURATION
+#                           CONFIGURATION
 # -----------------------------------------------------------------------------
 SERVER_HOST = "192.168.1.226"  # Adjust as needed
 SERVER_PORT = 8000
@@ -173,7 +173,7 @@ COLORS = DARK_COLORS
 #                           LOGGER SETUP
 # -----------------------------------------------------------------------------
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)  # Changed from WARNING to INFO
+logger.setLevel(logging.WARNING)  # DEBUG for detailed logs
 ch = logging.StreamHandler()
 formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 ch.setFormatter(formatter)
@@ -249,7 +249,7 @@ class AsyncWebSocketClient(QObject):
                     if isinstance(message, bytes):
                         if message.startswith(b'audio:'):
                             audio_data = message[len(b'audio:'):]
-                            logger.info(f"Received audio chunk size: {len(audio_data)}")
+                            logger.debug(f"Received audio chunk of size: {len(audio_data)} bytes")
                             self.audio_received.emit(message)
                         else:
                             logger.warning("Received binary message without audio prefix")
@@ -257,19 +257,17 @@ class AsyncWebSocketClient(QObject):
                     else:
                         try:
                             data = json.loads(message)
-                            logger.info(f"Received message: {data}")
+                            logger.debug(f"Received message: {data}")
                             
                             # Process STT messages first as highest priority
                             msg_type = data.get("type")
                             if msg_type == "stt":
-                                # Immediately relay STT text to UI
                                 stt_text = data.get("stt_text", "")
-                                logger.info(f"Processing STT text immediately: {stt_text}")
+                                logger.debug(f"Processing STT text immediately: {stt_text}")
                                 self.stt_text_received.emit(stt_text)
                             elif msg_type == "stt_state":
-                                # Update STT state
                                 is_listening = data.get("is_listening", False)
-                                logger.info(f"Updating STT state: listening = {is_listening}")
+                                logger.debug(f"Updating STT state: listening = {is_listening}")
                                 self.stt_state_received.emit(is_listening)
                             elif "content" in data:
                                 self.message_received.emit(data["content"])
@@ -317,7 +315,7 @@ class QueueAudioDevice(QIODevice):
         with QMutexLocker(self.mutex):
             if not self.audio_buffer:
                 if self.end_of_stream:
-                    logger.info("Buffer empty and end-of-stream marked")
+                    logger.debug("[QueueAudioDevice] Buffer empty and end-of-stream marked")
                     return bytes()
                 return bytes(maxSize)
             data = bytes(self.audio_buffer[:maxSize])
@@ -338,18 +336,18 @@ class QueueAudioDevice(QIODevice):
 
     def mark_end_of_stream(self):
         with QMutexLocker(self.mutex):
-            logger.info("Marking end of stream, current buffer size: %d", len(self.audio_buffer))
+            logger.info(f"[QueueAudioDevice] Marking end of stream, current buffer size: {len(self.audio_buffer)}")
             self.end_of_stream = True
             if len(self.audio_buffer) == 0:
                 self.last_read_empty = True
-                logger.info("Buffer empty at end of stream mark")
+                logger.info("[QueueAudioDevice] Buffer empty at end-of-stream mark")
 
     def clear_buffer(self):
         with QMutexLocker(self.mutex):
             self.audio_buffer.clear()
             self.end_of_stream = False
             self.last_read_empty = False
-            logger.info("Audio buffer cleared and state reset")
+            logger.info("[QueueAudioDevice] Audio buffer cleared and state reset")
 
 
 def setup_audio():
@@ -361,13 +359,17 @@ def setup_audio():
     device = QMediaDevices.defaultAudioOutput()
     if device is None:
         logger.error("Error: No audio output device found!")
+    else:
+        logger.info("Default audio output device found.")
 
     audio_sink = QAudioSink(device, audio_format)
     audio_sink.setVolume(1.0)
+    logger.info(f"Audio sink created with initial state: {audio_sink.state()}")
 
     audio_device = QueueAudioDevice()
     audio_device.open(QIODevice.OpenModeFlag.ReadOnly)
     audio_sink.start(audio_device)
+    logger.info("Audio sink started with audio device")
     return audio_sink, audio_device
 
 
@@ -609,20 +611,21 @@ class ChatWindow(QMainWindow):
             buffer_size = len(self.audio_device.audio_buffer)
             is_end_of_stream = self.audio_device.end_of_stream
             if current_state == QAudio.State.IdleState and buffer_size == 0 and is_end_of_stream:
-                logger.info("State monitor: detected idle condition, ensuring playback completion is handled")
+                logger.info("[check_audio_state] Detected idle condition. Buffer size: %d, End of stream: %s", buffer_size, is_end_of_stream)
                 self.handle_audio_state_changed(current_state)
 
     def handle_audio_state_changed(self, state):
-        logger.info(f"Audio state changed to: {state}")
+        logger.info(f"[handle_audio_state_changed] Audio state changed to: {state}")
+        with QMutexLocker(self.audio_device.mutex):
+            buffer_size = len(self.audio_device.audio_buffer)
+            is_end_of_stream = self.audio_device.end_of_stream
+        logger.info(f"[handle_audio_state_changed] Buffer size: {buffer_size}, End of stream: {is_end_of_stream}")
         if state == QAudio.State.IdleState and self.ws_client and self.ws_client.ws:
-            with QMutexLocker(self.audio_device.mutex):
-                buffer_size = len(self.audio_device.audio_buffer)
-                is_end_of_stream = self.audio_device.end_of_stream
-                logger.info(f"State change to Idle - Buffer size: {buffer_size}, End of stream: {is_end_of_stream}")
-                if buffer_size == 0 and is_end_of_stream:
-                    logger.info("Audio playback finished, sending playback-complete message to server...")
-                    asyncio.create_task(self.ws_client.ws.send(json.dumps({"action": "playback-complete"})))
-                    logger.info("Playback-complete message sent to server")
+            if buffer_size == 0 and is_end_of_stream:
+                logger.info("[handle_audio_state_changed] Audio playback finished. Sending playback-complete message to server...")
+                asyncio.create_task(self.ws_client.ws.send(json.dumps({"action": "playback-complete"})))
+                logger.info("[handle_audio_state_changed] Playback-complete message sent to server")
+                with QMutexLocker(self.audio_device.mutex):
                     self.audio_device.end_of_stream = False
                     self.audio_device.last_read_empty = False
 
@@ -722,10 +725,6 @@ class ChatWindow(QMainWindow):
         self.toggle_stt_button.style().polish(self.toggle_stt_button)
 
     async def toggle_stt(self):
-        """
-        Asynchronously toggles the STT state by sending the appropriate command
-        to the server over the WebSocket.
-        """
         self.is_toggling_stt = True
         try:
             if not self.stt_enabled:
@@ -786,23 +785,48 @@ class ChatWindow(QMainWindow):
             logger.error(f"Error toggling playback location: {e}")
 
     async def stop_tts_and_generation_async(self):
+        """
+        Stops both TTS and text generation by making API calls to the backend.
+        Also cleans up local audio buffers and stops audio immediately.
+        This function no longer restarts the audio sink or toggles STT.
+        """
+        logger.info("Stop button pressed - stopping TTS and generation")
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.post(f"{HTTP_BASE_URL}/api/stop-tts") as resp1:
-                    await resp1.json()
+                    resp1_data = await resp1.json()
+                    logger.info(f"Stop TTS response: {resp1_data}")
                 async with session.post(f"{HTTP_BASE_URL}/api/stop-generation") as resp2:
-                    await resp2.json()
-            with QMutexLocker(self.audio_device.mutex):
-                self.audio_device.clear_buffer()
-                self.audio_device.mark_end_of_stream()
-                while not self.audio_queue.empty():
-                    try:
-                        self.audio_queue.get_nowait()
-                    except:
-                        pass
-                self.audio_queue.put_nowait(None)
+                    resp2_data = await resp2.json()
+                    logger.info(f"Stop generation response: {resp2_data}")
         except Exception as e:
-            logger.error(f"Error stopping TTS and generation: {e}")
+            logger.error(f"Error stopping TTS and generation on server: {e}")
+
+        # Clean up local audio resources if using frontend playback.
+        if self.playback_location == "frontend":
+            logger.info("Cleaning frontend audio resources")
+            current_state = self.audio_sink.state()
+            logger.info(f"Audio sink state before stopping: {current_state}")
+            if current_state == QAudio.State.ActiveState:
+                logger.info("Audio sink is active; stopping it")
+                self.audio_sink.stop()
+                logger.info("Audio sink stopped")
+            else:
+                logger.info(f"Audio sink not active; current state: {current_state}")
+
+            with QMutexLocker(self.audio_device.mutex):
+                logger.info("Clearing audio device buffer")
+                self.audio_device.audio_buffer.clear()
+                self.audio_device.end_of_stream = True
+            while not self.audio_queue.empty():
+                try:
+                    self.audio_queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    break
+            self.audio_queue.put_nowait(None)
+            logger.info("End-of-stream marker placed in audio queue; audio resources cleaned up")
+
+        logger.info("Finalizing assistant bubble")
         self.finalize_assistant_bubble()
 
     def on_audio_received(self, pcm_data: bytes):
@@ -819,13 +843,13 @@ class ChatWindow(QMainWindow):
 
     def feed_audio_data(self):
         current_state = self.audio_sink.state()
+        logger.debug(f"[feed_audio_data] Audio sink state: {current_state}")
         if current_state != QAudio.State.ActiveState:
-            logger.warning(f"Warning: Audio sink not active! Current state: {current_state}")
+            logger.warning(f"[feed_audio_data] Audio sink not active! Current state: {current_state}. Attempting to restart.")
             self.audio_sink.start(self.audio_device)
+            logger.info("[feed_audio_data] Audio sink restarted")
             return
 
-        # Use a counter to limit how many chunks we process in a single call
-        # to avoid blocking the event loop for too long
         chunk_limit = 5
         chunks_processed = 0
         
@@ -836,20 +860,19 @@ class ChatWindow(QMainWindow):
                     chunks_processed += 1
                     
                     if pcm_chunk is None:
-                        logger.info("Received end-of-stream marker in feed_audio_data")
+                        logger.info("[feed_audio_data] Received end-of-stream marker")
                         self.audio_device.mark_end_of_stream()
                         if len(self.audio_device.audio_buffer) == 0:
-                            logger.info("Buffer empty at end-of-stream, stopping audio sink")
+                            logger.info("[feed_audio_data] Buffer empty at end-of-stream, stopping audio sink")
                             self.audio_sink.stop()
                         break
                         
                     bytes_written = self.audio_device.writeData(pcm_chunk)
-                    logger.debug(f"Wrote {bytes_written} bytes to audio device")
+                    logger.debug(f"[feed_audio_data] Wrote {bytes_written} bytes to audio device")
                     
                 except asyncio.QueueEmpty:
                     break
                     
-            # If we processed the chunk limit, schedule another call to continue processing
             if chunks_processed >= chunk_limit and not self.audio_queue.empty():
                 QTimer.singleShot(1, self.feed_audio_data)
                 
