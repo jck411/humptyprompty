@@ -78,7 +78,7 @@ class AudioPlayer:
     def write_audio(self, data: bytes):
         """
         Write audio data to the stream without blocking the main thread.
-        Uses a chunked approach to avoid blocking for large data.
+        Uses a buffered approach to avoid blocking and ensure smooth playback.
         
         Args:
             data: PCM audio data
@@ -86,14 +86,15 @@ class AudioPlayer:
         with self.lock:
             if self.stream and self.is_playing:
                 try:
-                    # Process audio in smaller chunks to avoid blocking
-                    CHUNK_SIZE = 4096  # Smaller chunks for more responsive processing
+                    # Use larger chunk size for more efficient processing
+                    CHUNK_SIZE = 8192  # Aligned with TTS chunk size for optimal performance
                     
-                    # Break data into smaller chunks for non-blocking write
+                    # Process audio in optimal-sized chunks
                     for i in range(0, len(data), CHUNK_SIZE):
                         chunk = data[i:i+CHUNK_SIZE]
                         if chunk:
-                            self.stream.write(chunk)
+                            # Write chunk directly to stream
+                            self.stream.write(chunk, num_frames=len(chunk)//2)
                     
                     self._buffer_count += 1
                     

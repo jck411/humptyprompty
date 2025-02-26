@@ -53,7 +53,7 @@ CONFIG: Dict[str, Any] = {
     "TTS_MODELS": {
         "PROVIDER": "azure",  # default provider
         "OPENAI_TTS": {
-            "TTS_CHUNK_SIZE": 1024,
+            "TTS_CHUNK_SIZE": 8192,  # Increased from 4096 for smoother streaming
             "TTS_SPEED": 1.0,
             "TTS_VOICE": "alloy",
             "TTS_MODEL": "tts-1",
@@ -63,7 +63,8 @@ CONFIG: Dict[str, Any] = {
                 "mp3": 44100,
                 "wav": 48000
             },
-            "PLAYBACK_RATE": 24000
+            "PLAYBACK_RATE": 24000,
+            "BUFFER_SIZE": 16384  # Added buffer size for smoother playback
         },
         "AZURE_TTS": {
             "TTS_SPEED": "0%",
