@@ -10,3 +10,4 @@ python-multipart==0.0.6
 timezonefinder==6.2.0
 pytz==2023.3.post1
 aiohttp==3.9.1
+deepgram-sdk==2.12.0

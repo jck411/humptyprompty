@@ -25,6 +25,13 @@ class STTConfig:
             for field in required_fields:
                 if field not in self.settings:
                     raise ValueError(f"Missing required field for Azure STT: {field}")
+        
+        # Deepgram-specific validation
+        elif self.provider == "deepgram":
+            required_fields = ["LANGUAGE", "MODEL", "SAMPLE_RATE"]
+            for field in required_fields:
+                if field not in self.settings:
+                    raise ValueError(f"Missing required field for Deepgram STT: {field}")
 
         # Add validation for other providers as they are implemented
         # elif self.provider == "other_provider":

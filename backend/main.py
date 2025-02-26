@@ -28,10 +28,20 @@ from backend.models.openaisdk import validate_messages_for_ws, stream_openai_com
 from backend.tts.processor import process_streams, audio_player
 from backend.endpoints.api import router as api_router
 from backend.wakewords.detector import start_wake_word_thread
-from backend.stt.azure_stt import stt_instance
+from backend.stt.provider import stt_instance
 from backend.endpoints.state import TTS_STOP_EVENT, GEN_STOP_EVENT
 
 from contextlib import asynccontextmanager
+
+import asyncio
+import json
+import logging
+from typing import Dict, Optional, Set
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from backend.config.config import CONFIG
+from backend.stt.provider import stt_instance, create_stt_instance
+from backend.endpoints.api import router
+from backend.endpoints.state import GEN_STOP_EVENT, TTS_STOP_EVENT
 
 # ------------------------------------------------------------------------------
 # Global Initialization
@@ -61,23 +71,20 @@ async def setup_audio_player():
     audio_player.set_main_loop(asyncio.get_running_loop())
     audio_player.on_playback_complete = handle_playback_complete
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    start_wake_word_thread()
-    await setup_audio_player()  # This now sets the main loop
-    yield
-    # Ensure STT tasks are stopped before shutdown
-    await stt_manager.stop()
-    shutdown()
+# ------------------------------------------------------------------------------
+# Global Variables
+# ------------------------------------------------------------------------------
+logger = logging.getLogger(__name__)
+# Global reference to STTManager instance
+stt_manager: Optional['STTManager'] = None
 
-app = FastAPI(lifespan=lifespan)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:3000", "*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# ------------------------------------------------------------------------------
+# Initialization Functions
+# ------------------------------------------------------------------------------
+def create_stt_manager():
+    global stt_manager
+    stt_manager = STTManager(CONFIG, stt_instance)
+    return stt_manager
 
 # ------------------------------------------------------------------------------
 # Centralized STT Manager (Revised with Thread-Safe Shared Data Structures)
@@ -85,7 +92,7 @@ app.add_middleware(
 class STTManager:
     def __init__(self, config, stt_instance):
         self.config = config
-        self.stt_instance = stt_instance
+        self._stt_instance = stt_instance  # Make this private
         # Set of websockets for state broadcasts, protected by an async lock
         self.websocket_clients: Set[WebSocket] = set()
         self.websocket_clients_lock = asyncio.Lock()
@@ -97,6 +104,18 @@ class STTManager:
         self._speech_queue = asyncio.Queue()
         # Start the queue monitoring task
         self._queue_monitor_task = None
+
+    @property
+    def stt_instance(self):
+        return self._stt_instance
+
+    @stt_instance.setter
+    def stt_instance(self, new_instance):
+        """Safely update the STT instance"""
+        was_listening = self._stt_instance.is_listening
+        self._stt_instance = new_instance
+        if was_listening:
+            asyncio.create_task(self.start(update_global=False))
 
     async def _monitor_speech_queue(self):
         """
@@ -293,8 +312,27 @@ class STTManager:
             except asyncio.CancelledError:
                 print("STTManager: Listen task cancelled successfully")
 
-# Instantiate the STTManager
-stt_manager = STTManager(CONFIG, stt_instance)
+# ------------------------------------------------------------------------------
+# FastAPI App Setup
+# ------------------------------------------------------------------------------
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    create_stt_manager()  # Create STT manager instance
+    start_wake_word_thread()
+    await setup_audio_player()  # This now sets the main loop
+    yield
+    # Ensure STT tasks are stopped before shutdown
+    await stt_manager.stop()
+    shutdown()
+
+app = FastAPI(lifespan=lifespan)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000", "*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # ------------------------------------------------------------------------------
 # WebSocket Endpoint

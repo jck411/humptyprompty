@@ -94,7 +94,7 @@ CONFIG: Dict[str, Any] = {
         "RATE": 24000,
     },
     "STT_MODELS": {
-        "PROVIDER": "azure",  # default provider
+        "PROVIDER": "deepgram",  # default provider
         "AZURE_STT": {
             "LANGUAGE": "en-US",
             "CONTINUOUS_RECOGNITION": True,
@@ -108,8 +108,18 @@ CONFIG: Dict[str, Any] = {
             "CHUNK_SIZE": 1024,
             "AUDIO_FORMAT": "pcm",
             # Additional OpenAI-specific settings can be added here
+        },
+        "DEEPGRAM_STT": {
+            "LANGUAGE": "en-US",
+            "MODEL": "nova-2",
+            "SAMPLE_RATE": 16000,
+            "SMART_FORMAT": True,
+            "INTERIM_RESULTS": True,
+            "ENCODING": "linear16",
+            "CHANNELS": 1,
+            "ENDPOINTING": True,
+            "UTTERANCE_END_MS": 1000
         }
-        # Future providers can be added here following the same pattern
     },
     "LOGGING": {
         "PRINT_SEGMENTS": True,

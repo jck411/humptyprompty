@@ -113,13 +113,3 @@ class AzureSTTProvider(BaseSTTProvider):
         except Exception as e:
             print(f"Azure STT: Error during pause: {e}")
             self._state = STTState.ERROR
-
-# Create configuration from global config.
-stt_config = STTConfig(
-    provider="azure",
-    settings=CONFIG["STT_MODELS"]["AZURE_STT"],
-    enabled=CONFIG["GENERAL_AUDIO"]["STT_ENABLED"]
-)
-
-# Create a single instance for your application.
-stt_instance = AzureSTTProvider(stt_config)

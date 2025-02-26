@@ -4,7 +4,7 @@ from typing import Optional, Callable
 
 from backend.config.config import CONFIG
 from backend.audio.player import create_audio_player
-from backend.stt.azure_stt import stt_instance
+from backend.stt.provider import stt_instance
 
 logger = logging.getLogger(__name__)
 
