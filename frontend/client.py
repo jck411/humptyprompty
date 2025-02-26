@@ -686,11 +686,21 @@ class ChatWindow(QMainWindow):
         if self.stt_location == "frontend" and self.frontend_stt_instance and self.stt_enabled:
             stt_manager.set_tts_playing_state(False)
             logger.info("Frontend STT notified that TTS playback has ended")
+            
+            # Update UI state to reflect that STT is listening again
+            if self.stt_enabled:
+                self.stt_listening = True
+                self.update_stt_button_style()
         
         # If backend STT, let the backend know playback is complete
         elif self.stt_location == "backend" and self.ws_client and self.ws_client.ws and self.stt_enabled:
             asyncio.create_task(self.ws_client.ws.send(json.dumps({"action": "resume-stt-after-tts"})))
             logger.info("Sent resume-stt-after-tts to backend")
+            
+            # Update UI state to reflect that STT is listening again
+            if self.stt_enabled:
+                self.stt_listening = True
+                self.update_stt_button_style()
 
     def apply_styling(self):
         self.setStyleSheet(generate_main_stylesheet(COLORS))
