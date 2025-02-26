@@ -415,6 +415,9 @@ class ChatWindow(QMainWindow):
         self.stt_location = "backend"  # Default STT location
         self.tts_is_playing = False    # Track if TTS is currently playing
         
+        # Keep track of frontend STT processing task
+        self.frontend_stt_task = None
+        
         # Initialize frontend STT
         self.frontend_stt_instance = None
 
@@ -815,17 +818,30 @@ class ChatWindow(QMainWindow):
             logger.info("Frontend STT instance initialized")
             
             # Start processing the frontend STT queue
-            asyncio.create_task(self.process_frontend_stt_queue())
+            self.start_frontend_stt_processing()
         except Exception as e:
             logger.error(f"Error initializing frontend STT: {e}")
             self.frontend_stt_instance = None
-
+            
+    def start_frontend_stt_processing(self):
+        """Start the frontend STT processing task if not already running"""
+        if self.frontend_stt_task is None or self.frontend_stt_task.done():
+            logger.info("Starting frontend STT processing task")
+            self.frontend_stt_task = asyncio.create_task(self.process_frontend_stt_queue())
+            
+    def stop_frontend_stt_processing(self):
+        """Cancel the frontend STT processing task if running"""
+        if self.frontend_stt_task and not self.frontend_stt_task.done():
+            logger.info("Cancelling frontend STT processing task")
+            self.frontend_stt_task.cancel()
+            
     async def process_frontend_stt_queue(self):
         """Process text from the frontend STT queue"""
         if not self.frontend_stt_instance:
             return
             
         try:
+            logger.info("Started frontend STT queue processing task")
             while True:
                 if self.stt_location == "frontend" and self.frontend_stt_instance and not self.tts_is_playing:
                     text = self.frontend_stt_instance.get_speech_nowait()
@@ -833,6 +849,10 @@ class ChatWindow(QMainWindow):
                         # Update the UI with the STT text
                         self.handle_stt_text(text)
                 await asyncio.sleep(0.1)  # Check every 100ms
+        except asyncio.CancelledError:
+            logger.info("Frontend STT processing task was cancelled")
+            # Handle cancellation gracefully
+            return
         except Exception as e:
             logger.error(f"Error processing frontend STT queue: {e}")
 
@@ -847,6 +867,10 @@ class ChatWindow(QMainWindow):
             if was_listening:
                 await self.toggle_stt()  # This will stop the current STT
             
+            # If switching away from frontend STT, cancel the processing task
+            if self.stt_location == "frontend":
+                self.stop_frontend_stt_processing()
+                
             # Update the location
             self.stt_location = new_location
             self.toggle_stt_location_button.setText("STT BACK" if new_location == "backend" else "STT FRONT")
@@ -893,7 +917,7 @@ class ChatWindow(QMainWindow):
                             self.frontend_stt_instance.start_listening()
                         self.stt_enabled = True
                         # Start processing frontend STT queue
-                        asyncio.create_task(self.process_frontend_stt_queue())
+                        self.start_frontend_stt_processing()
                     else:
                         self.init_frontend_stt()
                         if self.frontend_stt_instance:
@@ -901,8 +925,6 @@ class ChatWindow(QMainWindow):
                             if not self.tts_is_playing:
                                 self.frontend_stt_instance.start_listening()
                             self.stt_enabled = True
-                            # Start processing frontend STT queue
-                            asyncio.create_task(self.process_frontend_stt_queue())
             else:
                 # Stop STT based on location
                 if self.stt_location == "backend":
