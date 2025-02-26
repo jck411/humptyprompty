@@ -16,7 +16,7 @@ async def openai_options():
 @router.post("/start-stt")
 async def start_stt_endpoint():
     """
-    If STT is currently paused, this starts listening again.
+    If STT is currently paused this starts listening again.
     Otherwise it does nothing.
     """
     print(f"Starting STT - Current state: {stt_instance.state}, Is listening: {stt_instance.is_listening}, Enabled: {CONFIG['GENERAL_AUDIO']['STT_ENABLED']}")
@@ -27,7 +27,7 @@ async def start_stt_endpoint():
 @router.post("/pause-stt")
 async def pause_stt_endpoint():
     """
-    If STT is currently listening, this pauses it.
+    If STT is currently listening this pauses it.
     Otherwise it does nothing.
     """
     print(f"Pausing STT - Current state: {stt_instance.state}, Is listening: {stt_instance.is_listening}, Enabled: {CONFIG['GENERAL_AUDIO']['STT_ENABLED']}")
@@ -39,27 +39,27 @@ async def pause_stt_endpoint():
 async def toggle_stt_enabled():
     """
     Toggle the global STT enabled state.
-    When disabled, no STT provider will process audio regardless of other settings.
+    When disabled no STT provider will process audio regardless of other settings.
     """
     try:
         # Update the global config
         new_state = not CONFIG["GENERAL_AUDIO"]["STT_ENABLED"]
         CONFIG["GENERAL_AUDIO"]["STT_ENABLED"] = new_state
-        
+
         # Update the provider's config directly
         stt_instance.config.enabled = new_state
-        
-        # If we're enabling STT, reinitialize the recognizer
+
+        # If we're enabling STT reinitialize the recognizer
         if new_state:
             print("Reinitializing STT recognizer...")
             stt_instance.setup_recognizer()
             stt_instance._state = STTState.READY
-        # If we're disabling STT, make sure to pause listening
+        # If we're disabling STT make sure to pause listening
         else:
             if stt_instance.is_listening:
                 stt_instance.pause_listening()
             stt_instance._state = STTState.PAUSED
-            
+
         return {
             "stt_enabled": new_state,
             "detail": "STT is now globally enabled." if new_state else "STT is now globally disabled."
@@ -102,11 +102,36 @@ async def toggle_playback_location():
     CONFIG["GENERAL_AUDIO"]["TTS_PLAYBACK_LOCATION"] = "frontend" if current == "backend" else "backend"
     return {"playback_location": CONFIG["GENERAL_AUDIO"]["TTS_PLAYBACK_LOCATION"]}
 
+# New endpoints for STT provider location
+@router.get("/stt-provider-location")
+async def get_stt_provider_location():
+    return {"stt_provider_location": CONFIG["GENERAL_AUDIO"]["STT_PROVIDER_LOCATION"]}
+
+@router.post("/set-stt-provider-location")
+async def set_stt_provider_location(location_data: dict):
+    try:
+        location = location_data.get("location")
+        if location not in ["frontend", "backend"]:
+            raise HTTPException(status_code=400, detail="Location must be 'frontend' or 'backend'")
+        
+        # Update the config
+        CONFIG["GENERAL_AUDIO"]["STT_PROVIDER_LOCATION"] = location
+        
+        # If switching to frontend, we want to pause the backend STT if it's running
+        if location == "frontend" and stt_instance.is_listening:
+            stt_instance.pause_listening()
+            
+        return {"stt_provider_location": location}
+    except Exception as e:
+        if isinstance(e, HTTPException):
+            raise e
+        raise HTTPException(status_code=500, detail=f"Failed to set STT provider location: {str(e)}")
+
 @router.post("/stop-tts")
 async def stop_tts():
     logger.info("Stop TTS requested")
     TTS_STOP_EVENT.set()
-    
+
     # Let the audio_player completion callback handle STT resumption
     # This ensures a single path for resuming STT and prevents race conditions
     return {"status": "success", "message": "TTS stopped"}
@@ -134,21 +159,21 @@ async def switch_stt_provider(provider: str):
 
         # Update the global config
         CONFIG["STT_MODELS"]["PROVIDER"] = provider
-        
+
         # Store the current listening state
         was_listening = stt_instance.is_listening
-        
-        # If currently listening, pause first
+
+        # If currently listening pause first
         if was_listening:
             stt_instance.pause_listening()
-        
+
         # Create new instance with updated provider
         stt_instance = create_stt_instance()
-        
+
         # Restore listening state if it was listening before
         if was_listening and CONFIG["GENERAL_AUDIO"]["STT_ENABLED"]:
             await stt_instance.start_listening()
-            
+
         return {
             "detail": f"STT provider switched to {provider}",
             "provider": provider,

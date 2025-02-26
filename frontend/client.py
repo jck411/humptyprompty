@@ -4,11 +4,13 @@ import json
 import asyncio
 import aiohttp
 import logging
+import os
 
 # PyQt6 Imports
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QPushButton, QScrollArea, QSizePolicy, QTextEdit, QFrame, QLabel
+    QPushButton, QScrollArea, QSizePolicy, QTextEdit, QFrame, QLabel,
+    QButtonGroup
 )
 from PyQt6.QtCore import (
     Qt, QTimer, QSize, QMutex, QMutexLocker, QIODevice, pyqtSignal, QObject
@@ -19,6 +21,10 @@ from PyQt6.QtGui import (
 from PyQt6.QtMultimedia import (
     QAudioFormat, QAudioSink, QMediaDevices, QAudio
 )
+
+# Import Frontend STT
+from frontend.stt import stt_manager
+from frontend.stt.base import STTState
 
 # qasync integration
 from qasync import QEventLoop
@@ -401,11 +407,15 @@ class ChatWindow(QMainWindow):
 
         # Default playback location
         self.playback_location = "backend"
-
+        
         # STT states
         self.stt_listening = False
         self.stt_enabled = False
         self.is_toggling_stt = False
+        self.stt_location = "backend"  # Default STT location
+        
+        # Initialize frontend STT
+        self.frontend_stt_instance = None
 
         # UI components
         self.setup_top_buttons_layout()
@@ -433,11 +443,27 @@ class ChatWindow(QMainWindow):
                     data = await resp.json()
                     self.tts_enabled = data.get("tts_enabled", False)
                     logger.info(f"Initial TTS state: {self.tts_enabled}")
+                
+                # Get STT provider location
+                async with session.get(f"{HTTP_BASE_URL}/api/stt-provider-location") as resp:
+                    try:
+                        data = await resp.json()
+                        self.stt_location = data.get("stt_provider_location", "backend")
+                        logger.info(f"Initial STT provider location: {self.stt_location}")
+                    except:
+                        # If endpoint doesn't exist, default to backend
+                        self.stt_location = "backend"
+                        logger.warning("Could not get STT provider location, defaulting to backend")
+                        
         except Exception as e:
             logger.error(f"Error getting initial TTS state: {e}")
             self.tts_enabled = False
 
         self.is_toggling_tts = False
+        
+        # Initialize frontend STT if needed
+        if self.stt_location == "frontend":
+            self.init_frontend_stt()
 
     async def load_playback_state_async(self):
         """
@@ -479,6 +505,11 @@ class ChatWindow(QMainWindow):
         self.toggle_playback_button = QPushButton("BACK PLAY")
         self.toggle_playback_button.setFixedSize(120, 40)
         
+        # Add STT location toggle button
+        self.toggle_stt_location_button = QPushButton("STT BACK")
+        self.toggle_stt_location_button.setFixedSize(120, 40)
+        self.toggle_stt_location_button.setObjectName("sttLocationButton")
+
         # New CLEAR button added here
         self.clear_chat_button = QPushButton("CLEAR")
         self.clear_chat_button.setFixedSize(120, 40)
@@ -487,6 +518,7 @@ class ChatWindow(QMainWindow):
         left_layout.addWidget(self.toggle_stt_button)
         left_layout.addWidget(self.toggle_tts_button)
         left_layout.addWidget(self.toggle_playback_button)
+        left_layout.addWidget(self.toggle_stt_location_button)
         left_layout.addWidget(self.clear_chat_button)
         left_layout.addStretch()
 
@@ -516,6 +548,7 @@ class ChatWindow(QMainWindow):
         self.toggle_stt_button.clicked.connect(lambda: asyncio.create_task(self.toggle_stt()))
         self.toggle_tts_button.clicked.connect(lambda: asyncio.create_task(self.toggle_tts_async()))
         self.toggle_playback_button.clicked.connect(lambda: asyncio.create_task(self.toggle_playback_async()))
+        self.toggle_stt_location_button.clicked.connect(lambda: asyncio.create_task(self.toggle_stt_location_async()))
 
     def setup_chat_area_layout(self):
         self.chat_area = QWidget()
@@ -634,6 +667,11 @@ class ChatWindow(QMainWindow):
                 with QMutexLocker(self.audio_device.mutex):
                     self.audio_device.end_of_stream = False
                     self.audio_device.last_read_empty = False
+                
+                # If frontend playback and frontend STT, signal TTS ended
+                if self.playback_location == "frontend" and self.stt_location == "frontend" and self.frontend_stt_instance:
+                    stt_manager.set_tts_playing_state(False)
+                    logger.info("Frontend STT notified that TTS playback has ended")
 
     def apply_styling(self):
         self.setStyleSheet(generate_main_stylesheet(COLORS))
@@ -695,7 +733,19 @@ class ChatWindow(QMainWindow):
             self.assistant_bubble_in_progress = None
 
     def handle_stt_text(self, text):
-        self.text_input.setPlainText(text)
+        # Process text from STT (either backend or frontend)
+        if text.startswith("(interim) "):
+            # Only update with interim results if not empty
+            interim_text = text[len("(interim) "):]
+            if interim_text.strip():
+                self.text_input.setPlainText(interim_text)
+        elif text.startswith("[final] "):
+            final_text = text[len("[final] "):]
+            if final_text.strip():
+                self.text_input.setPlainText(final_text)
+        else:
+            # Handle plain text (from backend)
+            self.text_input.setPlainText(text)
 
     def handle_connection_status(self, connected):
         self.setWindowTitle(f"Modern Chat Interface - {'Connected' if connected else 'Disconnected'}")
@@ -707,6 +757,13 @@ class ChatWindow(QMainWindow):
     def handle_stt_state(self, is_listening: bool):
         self.stt_listening = is_listening
         self.update_stt_button_style()
+        
+        # If using frontend STT, update frontend STT state
+        if self.stt_location == "frontend" and self.frontend_stt_instance:
+            if is_listening and not self.frontend_stt_instance.is_listening:
+                self.frontend_stt_instance.start_listening()
+            elif not is_listening and self.frontend_stt_instance.is_listening:
+                self.frontend_stt_instance.pause_listening()
 
     def add_message(self, text, is_user):
         bubble = MessageBubble(text, is_user)
@@ -730,22 +787,113 @@ class ChatWindow(QMainWindow):
         self.toggle_stt_button.style().unpolish(self.toggle_stt_button)
         self.toggle_stt_button.style().polish(self.toggle_stt_button)
 
+    def init_frontend_stt(self):
+        """Initialize the frontend STT instance"""
+        try:
+            self.frontend_stt_instance = stt_manager.get_instance()
+            logger.info("Frontend STT instance initialized")
+            
+            # Start processing the frontend STT queue
+            asyncio.create_task(self.process_frontend_stt_queue())
+        except Exception as e:
+            logger.error(f"Error initializing frontend STT: {e}")
+            self.frontend_stt_instance = None
+
+    async def process_frontend_stt_queue(self):
+        """Process text from the frontend STT queue"""
+        if not self.frontend_stt_instance:
+            return
+            
+        try:
+            while True:
+                if self.stt_location == "frontend" and self.frontend_stt_instance:
+                    text = self.frontend_stt_instance.get_speech_nowait()
+                    if text:
+                        # Update the UI with the STT text
+                        self.handle_stt_text(text)
+                await asyncio.sleep(0.1)  # Check every 100ms
+        except Exception as e:
+            logger.error(f"Error processing frontend STT queue: {e}")
+
+    async def toggle_stt_location_async(self):
+        """Toggle between frontend and backend STT"""
+        try:
+            # Toggle the STT location
+            new_location = "frontend" if self.stt_location == "backend" else "backend"
+            
+            # If currently listening, stop first
+            was_listening = self.stt_enabled
+            if was_listening:
+                await self.toggle_stt()  # This will stop the current STT
+            
+            # Update the location
+            self.stt_location = new_location
+            self.toggle_stt_location_button.setText("STT BACK" if new_location == "backend" else "STT FRONT")
+            
+            # Update backend config via API
+            async with aiohttp.ClientSession() as session:
+                try:
+                    async with session.post(
+                        f"{HTTP_BASE_URL}/api/set-stt-provider-location",
+                        json={"location": new_location}
+                    ) as resp:
+                        data = await resp.json()
+                        logger.info(f"STT provider location set to {new_location}, response: {data}")
+                except Exception as e:
+                    logger.warning(f"Could not update backend STT location: {e}")
+            
+            # Initialize frontend STT if needed
+            if new_location == "frontend" and not self.frontend_stt_instance:
+                self.init_frontend_stt()
+                
+            # Restart STT if it was listening before
+            if was_listening:
+                await self.toggle_stt()
+                
+            logger.info(f"STT location toggled to {new_location}")
+        except Exception as e:
+            logger.error(f"Error toggling STT location: {e}")
+
     async def toggle_stt(self):
         self.is_toggling_stt = True
         try:
             if not self.stt_enabled:
-                if self.ws_client.ws:
-                    await self.ws_client.ws.send(json.dumps({"action": "start-stt"}))
-                    self.stt_enabled = True
-                else:
-                    logger.error("WebSocket is not connected; cannot start STT.")
+                # Start STT based on location
+                if self.stt_location == "backend":
+                    if self.ws_client.ws:
+                        await self.ws_client.ws.send(json.dumps({"action": "start-stt"}))
+                        self.stt_enabled = True
+                    else:
+                        logger.error("WebSocket is not connected; cannot start backend STT.")
+                elif self.stt_location == "frontend":
+                    if self.frontend_stt_instance:
+                        self.frontend_stt_instance.start_listening()
+                        self.stt_enabled = True
+                        # Start processing frontend STT queue
+                        asyncio.create_task(self.process_frontend_stt_queue())
+                    else:
+                        self.init_frontend_stt()
+                        if self.frontend_stt_instance:
+                            self.frontend_stt_instance.start_listening()
+                            self.stt_enabled = True
+                            # Start processing frontend STT queue
+                            asyncio.create_task(self.process_frontend_stt_queue())
             else:
-                if self.ws_client.ws:
-                    await self.ws_client.ws.send(json.dumps({"action": "pause-stt"}))
+                # Stop STT based on location
+                if self.stt_location == "backend":
+                    if self.ws_client.ws:
+                        await self.ws_client.ws.send(json.dumps({"action": "pause-stt"}))
+                        self.stt_enabled = False
+                    else:
+                        logger.error("WebSocket is not connected; cannot pause backend STT.")
+                elif self.stt_location == "frontend" and self.frontend_stt_instance:
+                    self.frontend_stt_instance.pause_listening()
                     self.stt_enabled = False
-                else:
-                    logger.error("WebSocket is not connected; cannot pause STT.")
+                    
             self.toggle_stt_button.setText("STT On" if self.stt_enabled else "STT Off")
+            # Update UI to reflect listening state
+            self.stt_listening = self.stt_enabled
+            self.update_stt_button_style()
         except Exception as e:
             logger.error(f"Error toggling STT: {e}")
         finally:
@@ -770,6 +918,11 @@ class ChatWindow(QMainWindow):
                             pass
                     self.audio_queue.put_nowait(None)
                 self.toggle_tts_button.setText("TTS On" if self.tts_enabled else "TTS Off")
+                
+                # If using frontend STT, update its TTS playing state
+                if self.stt_location == "frontend" and self.frontend_stt_instance:
+                    # Update the STT manager's TTS playing state (initially not playing)
+                    stt_manager.set_tts_playing_state(False)
         except Exception as e:
             logger.error(f"Error toggling TTS: {e}")
         finally:
@@ -831,6 +984,11 @@ class ChatWindow(QMainWindow):
                     break
             self.audio_queue.put_nowait(None)
             logger.info("End-of-stream marker placed in audio queue; audio resources cleaned up")
+            
+            # If frontend playback and frontend STT, signal TTS ended
+            if self.stt_location == "frontend" and self.frontend_stt_instance:
+                stt_manager.set_tts_playing_state(False)
+                logger.info("Frontend STT notified that TTS playback has ended")
 
         logger.info("Finalizing assistant bubble")
         self.finalize_assistant_bubble()
@@ -841,10 +999,22 @@ class ChatWindow(QMainWindow):
             logger.info("Received empty audio message, marking end of stream")
             self.audio_queue.put_nowait(None)
             self.audio_device.mark_end_of_stream()
+            
+            # If TTS is playing in frontend and we just got end of stream, signal TTS ended
+            # This allows STT to resume if it was paused during TTS playback
+            if self.playback_location == "frontend" and self.stt_location == "frontend" and self.frontend_stt_instance:
+                stt_manager.set_tts_playing_state(False)
+                logger.info("Notified frontend STT that TTS playback has ended")
         else:
             prefix = b'audio:'
             if pcm_data.startswith(prefix):
                 pcm_data = pcm_data[len(prefix):]
+                
+            # If this is the first chunk and we're using frontend STT, pause STT during playback
+            if self.playback_location == "frontend" and self.stt_location == "frontend" and self.frontend_stt_instance:
+                stt_manager.set_tts_playing_state(True)
+                logger.info("Pausing frontend STT for TTS playback")
+                
             self.audio_queue.put_nowait(pcm_data)
 
     def feed_audio_data(self):
@@ -871,6 +1041,12 @@ class ChatWindow(QMainWindow):
                         if len(self.audio_device.audio_buffer) == 0:
                             logger.info("[feed_audio_data] Buffer empty at end-of-stream, stopping audio sink")
                             self.audio_sink.stop()
+                            
+                            # If frontend playback and frontend STT, signal TTS ended
+                            if self.playback_location == "frontend" and self.stt_location == "frontend" and self.frontend_stt_instance:
+                                stt_manager.set_tts_playing_state(False)
+                                logger.info("Frontend STT notified that TTS playback has ended")
+                                
                         break
                         
                     bytes_written = self.audio_device.writeData(pcm_chunk)
