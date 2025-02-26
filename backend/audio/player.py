@@ -11,51 +11,90 @@ logger = logging.getLogger(__name__)
 
 class AudioPlayer:
     def __init__(self, pyaudio_instance, playback_rate=24000, channels=1, format=pyaudio.paInt16):
-        self.pyaudio = pyaudio_instance
+        """
+        Initialize an audio player using PyAudio.
+        
+        Args:
+            pyaudio_instance: PyAudio instance to use
+            playback_rate: Sample rate in Hz
+            channels: Number of audio channels
+            format: Audio format (from PyAudio constants)
+        """
+        self.pa = pyaudio_instance
         self.playback_rate = playback_rate
         self.channels = channels
         self.format = format
+        
         self.stream = None
-        self.lock = threading.Lock()
         self.is_playing = False
-        self.on_playback_complete: Optional[Callable] = None
+        self.lock = threading.RLock()
+        
         self._buffer_count = 0
         self._last_chunk = False
-        self.executor = ThreadPoolExecutor(max_workers=1)
         self._main_loop = None
+        self.on_playback_complete = None
 
     def start_stream(self):
+        """
+        Start the PyAudio stream for playback.
+        """
         with self.lock:
-            if not self.is_playing:
-                logger.debug(f"Starting audio stream with rate={self.playback_rate}, channels={self.channels}, format={self.format}")
-                self.stream = self.pyaudio.open(
-                    format=self.format,
-                    channels=self.channels,
-                    rate=self.playback_rate,
-                    output=True,
-                    frames_per_buffer=1024
-                )
-                self.is_playing = True
-                self._buffer_count = 0
-                self._last_chunk = False
+            if self.stream is None:
+                try:
+                    self.stream = self.pa.open(
+                        format=self.format,
+                        channels=self.channels,
+                        rate=self.playback_rate,
+                        output=True,
+                        frames_per_buffer=1024
+                    )
+                    logger.debug("Audio stream created")
+                    
+                    self.is_playing = True
+                    self._buffer_count = 0
+                    self._last_chunk = False
+                    
+                    logger.info("Audio playback stream started")
+                except Exception as e:
+                    logger.error(f"Failed to create audio stream: {e}")
+                    self.is_playing = False
 
     def stop_stream(self):
+        """
+        Stop the PyAudio stream.
+        """
         with self.lock:
-            if self.stream and self.is_playing:
-                logger.debug("Stopping audio stream")
-                self.stream.stop_stream()
-                self.stream.close()
-                self.stream = None
-                self.is_playing = False
-                # Notify completion when stream is explicitly stopped
-                self._notify_completion()
+            if self.stream:
+                try:
+                    self.stream.stop_stream()
+                    self.stream.close()
+                    logger.debug("Audio stream stopped and closed")
+                except Exception as e:
+                    logger.error(f"Error stopping audio stream: {e}")
+                finally:
+                    self.stream = None
+                    self.is_playing = False
 
     def write_audio(self, data: bytes):
+        """
+        Write audio data to the stream without blocking the main thread.
+        Uses a chunked approach to avoid blocking for large data.
+        
+        Args:
+            data: PCM audio data
+        """
         with self.lock:
             if self.stream and self.is_playing:
                 try:
-                    logger.debug(f"Writing {len(data)} bytes to audio stream")
-                    self.stream.write(data)
+                    # Process audio in smaller chunks to avoid blocking
+                    CHUNK_SIZE = 4096  # Smaller chunks for more responsive processing
+                    
+                    # Break data into smaller chunks for non-blocking write
+                    for i in range(0, len(data), CHUNK_SIZE):
+                        chunk = data[i:i+CHUNK_SIZE]
+                        if chunk:
+                            self.stream.write(chunk)
+                    
                     self._buffer_count += 1
                     
                     # If this was marked as the last chunk and we've written it
@@ -78,38 +117,16 @@ class AudioPlayer:
 
     def _notify_completion(self):
         """Helper method to handle completion notification"""
-        if self.on_playback_complete and callable(self.on_playback_complete):
-            logger.debug("Notifying playback completion")
-            if self._main_loop is None:
-                logger.error("Main loop not set - cannot send completion notification")
-                return
-                
-            async def _run_callback():
-                try:
-                    await self.on_playback_complete()
-                except Exception as e:
-                    logger.error(f"Error in completion callback: {e}")
+        if self._main_loop and self.on_playback_complete:
+            if asyncio.iscoroutinefunction(self.on_playback_complete):
+                self._main_loop.create_task(self.on_playback_complete())
 
-            future = asyncio.run_coroutine_threadsafe(_run_callback(), self._main_loop)
-            future.add_done_callback(lambda f: logger.debug("Completion callback finished"))
 
 def create_audio_player():
-    """Factory function to create an AudioPlayer instance with the singleton PyAudio."""
-    # Convert bits to pyaudio format
-    format_map = {
-        8: pyaudio.paInt8,
-        16: pyaudio.paInt16,
-        24: pyaudio.paInt24,
-        32: pyaudio.paInt32,
-    }
-    format_bits = CONFIG["AUDIO_SETTINGS"]["FORMAT"]
-    format_value = format_map.get(format_bits, pyaudio.paInt16)
-    
-    logger.debug(f"Creating audio player with format={format_bits}bits, rate={CONFIG['AUDIO_SETTINGS']['RATE']}")
-    
-    return AudioPlayer(
-        PyAudioSingleton(),
-        playback_rate=CONFIG["AUDIO_SETTINGS"]["RATE"],
-        channels=CONFIG["AUDIO_SETTINGS"]["CHANNELS"],
-        format=format_value
-    )
+    """
+    Create and return a singleton AudioPlayer instance.
+    Note: This expects PyAudioSingleton to be initialized elsewhere.
+    """
+    from backend.audio.singleton import PyAudioSingleton
+    pa_instance = PyAudioSingleton()
+    return AudioPlayer(pa_instance)

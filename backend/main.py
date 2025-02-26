@@ -93,26 +93,63 @@ class STTManager:
         self._listening_event = asyncio.Event()
         # A single task that awaits new speech results
         self._listen_task: Optional[asyncio.Task] = None
+        # Create asyncio Queue for speech results
+        self._speech_queue = asyncio.Queue()
+        # Start the queue monitoring task
+        self._queue_monitor_task = None
+
+    async def _monitor_speech_queue(self):
+        """
+        Non-blocking task that monitors the speech queue and transfers items
+        to the asyncio queue for processing.
+        """
+        try:
+            while True:
+                if not self._listening_event.is_set():
+                    await asyncio.sleep(0.1)
+                    continue
+                
+                # Check if there's any data in the speech queue, without blocking
+                try:
+                    # Use a very short timeout to avoid blocking
+                    if not self.stt_instance.speech_queue.empty():
+                        recognized_text = self.stt_instance.speech_queue.get_nowait()
+                        if recognized_text is not None:
+                            await self._speech_queue.put(recognized_text)
+                except Exception as e:
+                    print(f"STTManager: Error checking speech queue: {e}")
+                
+                await asyncio.sleep(0.01)  # Short sleep to prevent tight loop
+        except asyncio.CancelledError:
+            print("STTManager: Queue monitor task cancelled")
+        except Exception as e:
+            print(f"STTManager: Exception in queue monitor: {e}")
 
     async def _speech_listener(self):
         """
-        Awaits new speech results from the STT provider's blocking speech queue and
+        Awaits new speech results from the asyncio queue and
         broadcasts them immediately to all connected websockets.
         """
         try:
             while self._listening_event.is_set():
                 try:
-                    recognized_text = await asyncio.to_thread(self.stt_instance.speech_queue.get)
-                    if recognized_text is None:
-                        continue
+                    # Use asyncio.wait_for to add a timeout
+                    recognized_text = await asyncio.wait_for(
+                        self._speech_queue.get(), 
+                        timeout=0.1
+                    )
                     
                     # Immediately process and broadcast final results
                     if recognized_text.startswith("[final] "):
                         text = recognized_text[8:]
                         await self._broadcast_speech(text)
+                    
+                except asyncio.TimeoutError:
+                    # Just continue the loop - this is expected behavior
+                    continue
                 except Exception as e:
                     print(f"STTManager: Error processing speech result: {e}")
-                    await asyncio.sleep(0.1)  # Prevent tight loop on error
+                    await asyncio.sleep(0.01)  # Prevent tight loop on error
                     
         except asyncio.CancelledError:
             print("STTManager: Speech listener task cancelled")
@@ -154,6 +191,10 @@ class STTManager:
         # Set the event first to ensure no transcriptions are missed
         self._listening_event.set()
         
+        # Start the queue monitor task if it's not running
+        if self._queue_monitor_task is None or self._queue_monitor_task.done():
+            self._queue_monitor_task = asyncio.create_task(self._monitor_speech_queue())
+        
         # Start the speech listener task before starting recognition
         if self._listen_task is None or self._listen_task.done():
             self._listen_task = asyncio.create_task(self._speech_listener())
@@ -172,7 +213,7 @@ class STTManager:
         
         # Broadcast state immediately after successful start
         await self.broadcast_state()
-        
+
     def pause(self, update_global: bool = True):
         """
         Pauses STT listening by calling the underlying provider and clearing the
@@ -234,6 +275,16 @@ class STTManager:
         """
         print("STTManager: Stopping STT")
         self._listening_event.clear()
+        
+        # Cancel queue monitor task
+        if self._queue_monitor_task and not self._queue_monitor_task.done():
+            self._queue_monitor_task.cancel()
+            try:
+                await self._queue_monitor_task
+            except asyncio.CancelledError:
+                print("STTManager: Queue monitor task cancelled successfully")
+                
+        # Cancel speech listener task
         if self._listen_task and not self._listen_task.done():
             self._listen_task.cancel()
             try:

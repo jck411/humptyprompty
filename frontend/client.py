@@ -824,10 +824,17 @@ class ChatWindow(QMainWindow):
             self.audio_sink.start(self.audio_device)
             return
 
+        # Use a counter to limit how many chunks we process in a single call
+        # to avoid blocking the event loop for too long
+        chunk_limit = 5
+        chunks_processed = 0
+        
         try:
-            while True:
+            while chunks_processed < chunk_limit:
                 try:
                     pcm_chunk = self.audio_queue.get_nowait()
+                    chunks_processed += 1
+                    
                     if pcm_chunk is None:
                         logger.info("Received end-of-stream marker in feed_audio_data")
                         self.audio_device.mark_end_of_stream()
@@ -835,10 +842,17 @@ class ChatWindow(QMainWindow):
                             logger.info("Buffer empty at end-of-stream, stopping audio sink")
                             self.audio_sink.stop()
                         break
+                        
                     bytes_written = self.audio_device.writeData(pcm_chunk)
                     logger.debug(f"Wrote {bytes_written} bytes to audio device")
+                    
                 except asyncio.QueueEmpty:
                     break
+                    
+            # If we processed the chunk limit, schedule another call to continue processing
+            if chunks_processed >= chunk_limit and not self.audio_queue.empty():
+                QTimer.singleShot(1, self.feed_audio_data)
+                
         except Exception as e:
             logger.error(f"Error in feed_audio_data: {e}")
             logger.exception("Stack trace:")
