@@ -478,10 +478,16 @@ class ChatWindow(QMainWindow):
 
         self.toggle_playback_button = QPushButton("BACK PLAY")
         self.toggle_playback_button.setFixedSize(120, 40)
+        
+        # New CLEAR button added here
+        self.clear_chat_button = QPushButton("CLEAR")
+        self.clear_chat_button.setFixedSize(120, 40)
+        self.clear_chat_button.clicked.connect(self.clear_chat_history)
 
         left_layout.addWidget(self.toggle_stt_button)
         left_layout.addWidget(self.toggle_tts_button)
         left_layout.addWidget(self.toggle_playback_button)
+        left_layout.addWidget(self.clear_chat_button)
         left_layout.addStretch()
 
         top_layout.addWidget(left_buttons, stretch=1)
@@ -883,6 +889,28 @@ class ChatWindow(QMainWindow):
     def keyPressEvent(self, event):
         super().keyPressEvent(event)
 
+    def clear_chat_history(self):
+        """
+        Clears all chat bubbles from the chat area,
+        resets any in-progress assistant message,
+        and clears the internal conversation history.
+        """
+        # Remove all items from the chat layout
+        while self.chat_layout.count():
+            item = self.chat_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+        # Re-add the stretch to keep proper spacing
+        self.chat_layout.addStretch()
+        
+        # Reset any in-progress assistant message
+        self.assistant_text_in_progress = ""
+        self.assistant_bubble_in_progress = None
+        
+        # Clear the conversation history stored in the websocket client
+        self.ws_client.messages.clear()
+        logger.info("Chat history cleared, starting with a blank slate.")
 
 # -----------------------------------------------------------------------------
 #                                 MAIN
