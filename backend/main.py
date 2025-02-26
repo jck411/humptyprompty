@@ -86,9 +86,9 @@ class STTManager:
     def __init__(self, config, stt_instance):
         self.config = config
         self.stt_instance = stt_instance
-        # Set of websockets for state broadcasts, protected by a reentrant lock
+        # Set of websockets for state broadcasts, protected by an async lock
         self.websocket_clients: Set[WebSocket] = set()
-        self.websocket_clients_lock = threading.RLock()
+        self.websocket_clients_lock = asyncio.Lock()
         # Internal event to track whether STT is active
         self._listening_event = asyncio.Event()
         # A single task that awaits new speech results
@@ -170,7 +170,7 @@ class STTManager:
             "stt_text": recognized_text
         }
         print(f"\nBroadcasting STT message: {message}")
-        with self.websocket_clients_lock:
+        async with self.websocket_clients_lock:
             ws_list = list(self.websocket_clients)
         tasks = [self._send_json(ws, message) for ws in ws_list]
         results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -178,7 +178,7 @@ class STTManager:
         for ws, result in zip(ws_list, results):
             if isinstance(result, Exception):
                 print(f"STTManager: Error broadcasting speech to websocket: {result}")
-                with self.websocket_clients_lock:
+                async with self.websocket_clients_lock:
                     self.websocket_clients.discard(ws)
 
     async def start(self, update_global: bool = True):
@@ -241,14 +241,14 @@ class STTManager:
             "is_enabled": self.config["GENERAL_AUDIO"]["STT_ENABLED"]
         }
         print(f"Broadcasting STT state: {message}")
-        with self.websocket_clients_lock:
+        async with self.websocket_clients_lock:
             ws_list = list(self.websocket_clients)
         tasks = [self._send_json(ws, message) for ws in ws_list]
         results = await asyncio.gather(*tasks, return_exceptions=True)
         for ws, result in zip(ws_list, results):
             if isinstance(result, Exception):
                 print(f"STTManager: Error broadcasting state: {result}")
-                with self.websocket_clients_lock:
+                async with self.websocket_clients_lock:
                     self.websocket_clients.discard(ws)
 
     async def cleanup(self, websocket: WebSocket):
@@ -257,7 +257,8 @@ class STTManager:
         updates the global state.
         """
         print("STTManager: Cleaning up for a websocket")
-        with self.websocket_clients_lock:
+        is_empty = False
+        async with self.websocket_clients_lock:
             self.websocket_clients.discard(websocket)
             is_empty = not self.websocket_clients
         if is_empty:  # If this was the last client
@@ -302,7 +303,7 @@ stt_manager = STTManager(CONFIG, stt_instance)
 async def unified_chat_websocket(websocket: WebSocket):
     await websocket.accept()
     print("New WebSocket connection established")
-    with stt_manager.websocket_clients_lock:
+    async with stt_manager.websocket_clients_lock:
         stt_manager.websocket_clients.add(websocket)
 
     # Send initial STT state
