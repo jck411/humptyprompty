@@ -413,6 +413,7 @@ class ChatWindow(QMainWindow):
         self.stt_enabled = False
         self.is_toggling_stt = False
         self.stt_location = "backend"  # Default STT location
+        self.tts_is_playing = False    # Track if TTS is currently playing
         
         # Initialize frontend STT
         self.frontend_stt_instance = None
@@ -668,10 +669,25 @@ class ChatWindow(QMainWindow):
                     self.audio_device.end_of_stream = False
                     self.audio_device.last_read_empty = False
                 
-                # If frontend playback and frontend STT, signal TTS ended
-                if self.playback_location == "frontend" and self.stt_location == "frontend" and self.frontend_stt_instance:
-                    stt_manager.set_tts_playing_state(False)
-                    logger.info("Frontend STT notified that TTS playback has ended")
+                # Mark TTS as no longer playing
+                self.tts_is_playing = False
+                
+                # Schedule STT resume after a short delay to ensure playback is complete
+                QTimer.singleShot(500, lambda: self.resume_stt_after_playback())
+
+    def resume_stt_after_playback(self):
+        """Resume STT after TTS playback is complete"""
+        logger.info("Resuming STT after playback with delay")
+        
+        # If frontend STT, resume it directly
+        if self.stt_location == "frontend" and self.frontend_stt_instance and self.stt_enabled:
+            stt_manager.set_tts_playing_state(False)
+            logger.info("Frontend STT notified that TTS playback has ended")
+        
+        # If backend STT, let the backend know playback is complete
+        elif self.stt_location == "backend" and self.ws_client and self.ws_client.ws and self.stt_enabled:
+            asyncio.create_task(self.ws_client.ws.send(json.dumps({"action": "resume-stt-after-tts"})))
+            logger.info("Sent resume-stt-after-tts to backend")
 
     def apply_styling(self):
         self.setStyleSheet(generate_main_stylesheet(COLORS))
@@ -733,6 +749,11 @@ class ChatWindow(QMainWindow):
             self.assistant_bubble_in_progress = None
 
     def handle_stt_text(self, text):
+        # Don't process STT text if TTS is playing to prevent self-transcription
+        if self.tts_is_playing:
+            logger.info(f"Ignoring STT text during TTS playback: {text}")
+            return
+            
         # Process text from STT (either backend or frontend)
         if text.startswith("(interim) "):
             # Only update with interim results if not empty
@@ -760,7 +781,7 @@ class ChatWindow(QMainWindow):
         
         # If using frontend STT, update frontend STT state
         if self.stt_location == "frontend" and self.frontend_stt_instance:
-            if is_listening and not self.frontend_stt_instance.is_listening:
+            if is_listening and not self.frontend_stt_instance.is_listening and not self.tts_is_playing:
                 self.frontend_stt_instance.start_listening()
             elif not is_listening and self.frontend_stt_instance.is_listening:
                 self.frontend_stt_instance.pause_listening()
@@ -806,7 +827,7 @@ class ChatWindow(QMainWindow):
             
         try:
             while True:
-                if self.stt_location == "frontend" and self.frontend_stt_instance:
+                if self.stt_location == "frontend" and self.frontend_stt_instance and not self.tts_is_playing:
                     text = self.frontend_stt_instance.get_speech_nowait()
                     if text:
                         # Update the UI with the STT text
@@ -867,14 +888,18 @@ class ChatWindow(QMainWindow):
                         logger.error("WebSocket is not connected; cannot start backend STT.")
                 elif self.stt_location == "frontend":
                     if self.frontend_stt_instance:
-                        self.frontend_stt_instance.start_listening()
+                        # Only start if TTS is not playing
+                        if not self.tts_is_playing:
+                            self.frontend_stt_instance.start_listening()
                         self.stt_enabled = True
                         # Start processing frontend STT queue
                         asyncio.create_task(self.process_frontend_stt_queue())
                     else:
                         self.init_frontend_stt()
                         if self.frontend_stt_instance:
-                            self.frontend_stt_instance.start_listening()
+                            # Only start if TTS is not playing
+                            if not self.tts_is_playing:
+                                self.frontend_stt_instance.start_listening()
                             self.stt_enabled = True
                             # Start processing frontend STT queue
                             asyncio.create_task(self.process_frontend_stt_queue())
@@ -923,6 +948,7 @@ class ChatWindow(QMainWindow):
                 if self.stt_location == "frontend" and self.frontend_stt_instance:
                     # Update the STT manager's TTS playing state (initially not playing)
                     stt_manager.set_tts_playing_state(False)
+                    self.tts_is_playing = False
         except Exception as e:
             logger.error(f"Error toggling TTS: {e}")
         finally:
@@ -985,36 +1011,45 @@ class ChatWindow(QMainWindow):
             self.audio_queue.put_nowait(None)
             logger.info("End-of-stream marker placed in audio queue; audio resources cleaned up")
             
+            # Mark TTS as no longer playing
+            self.tts_is_playing = False
+            
             # If frontend playback and frontend STT, signal TTS ended
             if self.stt_location == "frontend" and self.frontend_stt_instance:
                 stt_manager.set_tts_playing_state(False)
                 logger.info("Frontend STT notified that TTS playback has ended")
+                
+            # Schedule STT resume after a short delay
+            QTimer.singleShot(500, lambda: self.resume_stt_after_playback())
 
         logger.info("Finalizing assistant bubble")
         self.finalize_assistant_bubble()
 
     def on_audio_received(self, pcm_data: bytes):
         logger.info(f"Processing audio chunk of size: {len(pcm_data)} bytes")
+        
+        # First chunk of audio - pause STT regardless of location
+        if len(pcm_data) > 10 and not self.tts_is_playing:
+            # Mark TTS as playing to prevent self-transcription
+            self.tts_is_playing = True
+            
+            # Pause STT during TTS playback to prevent self-transcription
+            if self.stt_location == "frontend" and self.frontend_stt_instance:
+                stt_manager.set_tts_playing_state(True)
+                logger.info("Pausing frontend STT for TTS playback")
+            elif self.stt_location == "backend" and self.ws_client and self.ws_client.ws:
+                # Tell backend to pause STT during playback
+                asyncio.create_task(self.ws_client.ws.send(json.dumps({"action": "pause-stt-for-tts"})))
+                logger.info("Sent pause-stt-for-tts to backend")
+        
         if pcm_data == b'audio:' or len(pcm_data) == 0:
             logger.info("Received empty audio message, marking end of stream")
             self.audio_queue.put_nowait(None)
             self.audio_device.mark_end_of_stream()
-            
-            # If TTS is playing in frontend and we just got end of stream, signal TTS ended
-            # This allows STT to resume if it was paused during TTS playback
-            if self.playback_location == "frontend" and self.stt_location == "frontend" and self.frontend_stt_instance:
-                stt_manager.set_tts_playing_state(False)
-                logger.info("Notified frontend STT that TTS playback has ended")
         else:
             prefix = b'audio:'
             if pcm_data.startswith(prefix):
                 pcm_data = pcm_data[len(prefix):]
-                
-            # If this is the first chunk and we're using frontend STT, pause STT during playback
-            if self.playback_location == "frontend" and self.stt_location == "frontend" and self.frontend_stt_instance:
-                stt_manager.set_tts_playing_state(True)
-                logger.info("Pausing frontend STT for TTS playback")
-                
             self.audio_queue.put_nowait(pcm_data)
 
     def feed_audio_data(self):
@@ -1042,10 +1077,8 @@ class ChatWindow(QMainWindow):
                             logger.info("[feed_audio_data] Buffer empty at end-of-stream, stopping audio sink")
                             self.audio_sink.stop()
                             
-                            # If frontend playback and frontend STT, signal TTS ended
-                            if self.playback_location == "frontend" and self.stt_location == "frontend" and self.frontend_stt_instance:
-                                stt_manager.set_tts_playing_state(False)
-                                logger.info("Frontend STT notified that TTS playback has ended")
+                            # Mark TTS as no longer playing
+                            self.tts_is_playing = False
                                 
                         break
                         

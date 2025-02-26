@@ -367,6 +367,20 @@ async def unified_chat_websocket(websocket: WebSocket):
                 else:
                     print("Server: Ignoring playback-complete message (backend playback mode)")
 
+            elif action == "pause-stt-for-tts":
+                # Pause backend STT during frontend TTS playback (without changing the global enabled state)
+                print("Pausing backend STT during TTS playback")
+                if stt_instance.is_listening:
+                    stt_instance.pause_listening()
+                await stt_manager.broadcast_state()
+                
+            elif action == "resume-stt-after-tts":
+                # Resume backend STT after frontend TTS playback (if globally enabled)
+                print("Received request to resume STT after TTS playback")
+                if CONFIG["GENERAL_AUDIO"]["STT_ENABLED"]:
+                    await stt_manager.start(update_global=False)
+                    await stt_manager.broadcast_state()
+                    
             elif action == "chat":
                 print("\nProcessing new chat message...")
                 print(f"TTS Enabled: {CONFIG['GENERAL_AUDIO']['TTS_ENABLED']}")
