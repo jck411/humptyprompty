@@ -160,7 +160,7 @@ def get_message_bubble_stylesheet(is_user, colors):
 # -----------------------------------------------------------------------------
 #                           CONFIGURATION
 # -----------------------------------------------------------------------------
-SERVER_HOST = "192.168.1.226"  # Adjust as needed
+SERVER_HOST = "127.0.0.1"  # Adjust as needed
 SERVER_PORT = 8000
 WEBSOCKET_PATH = "/ws/chat"
 HTTP_BASE_URL = f"http://{SERVER_HOST}:{SERVER_PORT}"
@@ -399,9 +399,6 @@ class ChatWindow(QMainWindow):
         self.assistant_text_in_progress = ""
         self.assistant_bubble_in_progress = None
 
-        # Default playback location
-        self.playback_location = "backend"
-
         # STT states
         self.stt_listening = False
         self.stt_enabled = False
@@ -419,7 +416,6 @@ class ChatWindow(QMainWindow):
 
         # Async tasks
         QTimer.singleShot(0, lambda: asyncio.create_task(self._init_states_async()))
-        QTimer.singleShot(0, lambda: asyncio.create_task(self.load_playback_state_async()))
 
         self.theme_toggle.setIcon(QIcon("/home/jack/humptyprompty/frontend/icons/light_mode.svg"))
 
@@ -439,24 +435,6 @@ class ChatWindow(QMainWindow):
 
         self.is_toggling_tts = False
 
-    async def load_playback_state_async(self):
-        """
-        Get the initial playback state (front/back).
-        """
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(f"{HTTP_BASE_URL}/api/playback-location") as resp:
-                    data = await resp.json()
-                    new_state = data.get("playback_location", None)
-                    if new_state:
-                        self.playback_location = new_state
-                        self.toggle_playback_button.setText("BACK PLAY" if self.playback_location == "backend" else "FRONT PLAY")
-                        logger.info(f"Loaded playback location: {self.playback_location}")
-                    else:
-                        logger.error("No playback_location returned from GET /api/playback-location")
-        except Exception as e:
-            logger.error(f"Error loading playback location: {e}")
-
     def setup_top_buttons_layout(self):
         self.top_widget = QWidget()
         top_layout = QHBoxLayout(self.top_widget)
@@ -475,18 +453,13 @@ class ChatWindow(QMainWindow):
 
         self.toggle_tts_button = QPushButton("TTS On" if getattr(self, 'tts_enabled', False) else "TTS Off")
         self.toggle_tts_button.setFixedSize(120, 40)
-
-        self.toggle_playback_button = QPushButton("BACK PLAY")
-        self.toggle_playback_button.setFixedSize(120, 40)
         
-        # New CLEAR button added here
         self.clear_chat_button = QPushButton("CLEAR")
         self.clear_chat_button.setFixedSize(120, 40)
         self.clear_chat_button.clicked.connect(self.clear_chat_history)
 
         left_layout.addWidget(self.toggle_stt_button)
         left_layout.addWidget(self.toggle_tts_button)
-        left_layout.addWidget(self.toggle_playback_button)
         left_layout.addWidget(self.clear_chat_button)
         left_layout.addStretch()
 
@@ -515,7 +488,6 @@ class ChatWindow(QMainWindow):
         # Connect buttons using asyncio.create_task for async handling
         self.toggle_stt_button.clicked.connect(lambda: asyncio.create_task(self.toggle_stt()))
         self.toggle_tts_button.clicked.connect(lambda: asyncio.create_task(self.toggle_tts_async()))
-        self.toggle_playback_button.clicked.connect(lambda: asyncio.create_task(self.toggle_playback_async()))
 
     def setup_chat_area_layout(self):
         self.chat_area = QWidget()
@@ -775,26 +747,10 @@ class ChatWindow(QMainWindow):
         finally:
             self.is_toggling_tts = False
 
-    async def toggle_playback_async(self):
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(f"{HTTP_BASE_URL}/api/toggle-playback-location") as resp:
-                    data = await resp.json()
-                    new_state = data.get("playback_location", None)
-                    if new_state:
-                        self.playback_location = new_state
-                        self.toggle_playback_button.setText("BACK PLAY" if self.playback_location == "backend" else "FRONT PLAY")
-                        logger.info(f"Playback location toggled to {self.playback_location}")
-                    else:
-                        logger.error("No playback_location returned from toggle endpoint")
-        except Exception as e:
-            logger.error(f"Error toggling playback location: {e}")
-
     async def stop_tts_and_generation_async(self):
         """
         Stops both TTS and text generation by making API calls to the backend.
         Also cleans up local audio buffers and stops audio immediately.
-        This function no longer restarts the audio sink or toggles STT.
         """
         logger.info("Stop button pressed - stopping TTS and generation")
         try:
@@ -808,29 +764,28 @@ class ChatWindow(QMainWindow):
         except Exception as e:
             logger.error(f"Error stopping TTS and generation on server: {e}")
 
-        # Clean up local audio resources if using frontend playback.
-        if self.playback_location == "frontend":
-            logger.info("Cleaning frontend audio resources")
-            current_state = self.audio_sink.state()
-            logger.info(f"Audio sink state before stopping: {current_state}")
-            if current_state == QAudio.State.ActiveState:
-                logger.info("Audio sink is active; stopping it")
-                self.audio_sink.stop()
-                logger.info("Audio sink stopped")
-            else:
-                logger.info(f"Audio sink not active; current state: {current_state}")
+        # Clean up local audio resources
+        logger.info("Cleaning frontend audio resources")
+        current_state = self.audio_sink.state()
+        logger.info(f"Audio sink state before stopping: {current_state}")
+        if current_state == QAudio.State.ActiveState:
+            logger.info("Audio sink is active; stopping it")
+            self.audio_sink.stop()
+            logger.info("Audio sink stopped")
+        else:
+            logger.info(f"Audio sink not active; current state: {current_state}")
 
-            with QMutexLocker(self.audio_device.mutex):
-                logger.info("Clearing audio device buffer")
-                self.audio_device.audio_buffer.clear()
-                self.audio_device.end_of_stream = True
-            while not self.audio_queue.empty():
-                try:
-                    self.audio_queue.get_nowait()
-                except asyncio.QueueEmpty:
-                    break
-            self.audio_queue.put_nowait(None)
-            logger.info("End-of-stream marker placed in audio queue; audio resources cleaned up")
+        with QMutexLocker(self.audio_device.mutex):
+            logger.info("Clearing audio device buffer")
+            self.audio_device.audio_buffer.clear()
+            self.audio_device.end_of_stream = True
+        while not self.audio_queue.empty():
+            try:
+                self.audio_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+        self.audio_queue.put_nowait(None)
+        logger.info("End-of-stream marker placed in audio queue; audio resources cleaned up")
 
         logger.info("Finalizing assistant bubble")
         self.finalize_assistant_bubble()

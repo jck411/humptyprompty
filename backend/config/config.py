@@ -40,7 +40,6 @@ CONFIG: Dict[str, Any] = {
     },
     "GENERAL_AUDIO": {
         "TTS_ENABLED": True,
-        "TTS_PLAYBACK_LOCATION": "frontend",  # "frontend" or "backend"
         "STT_ENABLED": True,
         "STT_PROVIDER_LOCATION": "backend",  # "frontend" or "backend" if frontend selected then backend STT is disabled
         "WAKEWORD_ENABLED": False,  # Enable/disable wake word detection
@@ -125,7 +124,9 @@ CONFIG: Dict[str, Any] = {
         "PRINT_SEGMENTS": True,
         "PRINT_TOOL_CALLS": False,
         "PRINT_FUNCTION_CALLS": False
-    }
+    },
+    "TTS_PROVIDER": "ELEVENLABS",  # "ELEVENLABS" or "AZURE" or "COQUI"
+    "TTS_VOICE": "default",
 }
 
 def setup_chat_client():

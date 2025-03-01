@@ -3,7 +3,6 @@ from fastapi import APIRouter, HTTPException, Response
 from backend.config.config import CONFIG
 from backend.stt.provider import stt_instance, create_stt_instance
 from backend.stt.base import STTState
-from backend.tts.processor import audio_player
 from backend.endpoints.state import GEN_STOP_EVENT, TTS_STOP_EVENT
 
 logger = logging.getLogger(__name__)
@@ -76,31 +75,6 @@ async def toggle_tts():
         return {"tts_enabled": CONFIG["GENERAL_AUDIO"]["TTS_ENABLED"]}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to toggle TTS: {str(e)}")
-
-# Re-added endpoint for toggling audio playback
-@router.post("/toggle-audio")
-async def toggle_audio_playback():
-    try:
-        if audio_player.is_playing:
-            audio_player.stop_stream()
-            return {"audio_playing": False}
-        else:
-            audio_player.start_stream()
-            return {"audio_playing": True}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to toggle audio playback: {str(e)}")
-
-# Endpoint to get the current playback location from the configuration
-@router.get("/playback-location")
-async def get_playback_location():
-    return {"playback_location": CONFIG["GENERAL_AUDIO"]["TTS_PLAYBACK_LOCATION"]}
-
-@router.post("/toggle-playback-location")
-async def toggle_playback_location():
-    current = CONFIG["GENERAL_AUDIO"]["TTS_PLAYBACK_LOCATION"]
-    # Toggle between frontend and backend
-    CONFIG["GENERAL_AUDIO"]["TTS_PLAYBACK_LOCATION"] = "frontend" if current == "backend" else "backend"
-    return {"playback_location": CONFIG["GENERAL_AUDIO"]["TTS_PLAYBACK_LOCATION"]}
 
 @router.post("/stop-tts")
 async def stop_tts():

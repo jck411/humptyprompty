@@ -6,7 +6,8 @@ from queue import Queue
 from typing import Any, AsyncIterator, Dict, List, Optional, Sequence, Set
 
 import uvicorn
-import pyaudio
+# Remove since we no longer need PyAudio for backend playback
+# import pyaudio
 from dotenv import load_dotenv
 import openai
 import re
@@ -20,12 +21,12 @@ import pvporcupine
 import struct
 
 from backend.config.config import CONFIG, setup_chat_client
-from backend.audio.singleton import PyAudioSingleton
-from backend.audio.lifecycle import shutdown_audio
+# Remove these imports since we're removing backend audio
+# from backend.audio.singleton import PyAudioSingleton
 from backend.tools.functions import get_tools, get_available_functions
 from backend.tools.helpers import get_function_and_args
 from backend.models.openaisdk import validate_messages_for_ws, stream_openai_completion
-from backend.tts.processor import process_streams, audio_player
+from backend.tts.processor import process_streams
 from backend.endpoints.api import router as api_router
 from backend.wakewords.detector import start_wake_word_thread
 from backend.stt.provider import stt_instance
@@ -48,28 +49,9 @@ from backend.endpoints.state import GEN_STOP_EVENT, TTS_STOP_EVENT
 # ------------------------------------------------------------------------------
 load_dotenv()
 client, DEPLOYMENT_NAME = setup_chat_client()
-pyaudio_instance = PyAudioSingleton()
 
 def shutdown():
-    shutdown_audio(audio_player)
-
-# Move handle_playback_complete before setup_audio_player
-async def handle_playback_complete():
-    """Callback for when audio playback completes"""
-    print("Backend audio playback complete, resuming STT...")
-    try:
-        if CONFIG["GENERAL_AUDIO"]["STT_ENABLED"]:
-            await stt_manager.start(update_global=False)
-            # Always broadcast state regardless of playback location
-            await stt_manager.broadcast_state()
-    except Exception as e:
-        print(f"Error in playback complete handler: {e}")
-
-async def setup_audio_player():
-    """Set up audio player callback"""
-    print("Setting up audio player callback...")
-    audio_player.set_main_loop(asyncio.get_running_loop())
-    audio_player.on_playback_complete = handle_playback_complete
+    pass
 
 # ------------------------------------------------------------------------------
 # Global Variables
@@ -319,7 +301,6 @@ class STTManager:
 async def lifespan(app: FastAPI):
     create_stt_manager()  # Create STT manager instance
     start_wake_word_thread()
-    await setup_audio_player()  # This now sets the main loop
     yield
     # Ensure STT tasks are stopped before shutdown
     await stt_manager.stop()
@@ -360,17 +341,15 @@ async def unified_chat_websocket(websocket: WebSocket):
                 await stt_manager.broadcast_state()
 
             elif action == "playback-complete":
-                # Only handle playback complete for frontend playback
-                if CONFIG["GENERAL_AUDIO"]["TTS_PLAYBACK_LOCATION"] == "frontend":
-                    print("Server: Received frontend playback-complete message, resuming STT...")
-                    await handle_playback_complete()
-                else:
-                    print("Server: Ignoring playback-complete message (backend playback mode)")
+                # Handle playback complete for frontend
+                print("Server: Received frontend playback-complete message, resuming STT...")
+                if CONFIG["GENERAL_AUDIO"]["STT_ENABLED"]:
+                    await stt_manager.start(update_global=False)
+                    await stt_manager.broadcast_state()
 
             elif action == "chat":
                 print("\nProcessing new chat message...")
                 print(f"TTS Enabled: {CONFIG['GENERAL_AUDIO']['TTS_ENABLED']}")
-                print(f"TTS Location: {CONFIG['GENERAL_AUDIO']['TTS_PLAYBACK_LOCATION']}")
                 
                 # Clear events for the new chat.
                 TTS_STOP_EVENT.clear()
@@ -394,8 +373,7 @@ async def unified_chat_websocket(websocket: WebSocket):
                 ))
 
                 audio_forward_task = None
-                if (CONFIG["GENERAL_AUDIO"]["TTS_PLAYBACK_LOCATION"] == "frontend" and 
-                    CONFIG["GENERAL_AUDIO"].get("TTS_ENABLED", False)):
+                if CONFIG["GENERAL_AUDIO"].get("TTS_ENABLED", False):
                     print("Setting up frontend audio forwarding...")
                     audio_forward_task = asyncio.create_task(forward_audio_to_websocket(
                         audio_queue, websocket, TTS_STOP_EVENT
