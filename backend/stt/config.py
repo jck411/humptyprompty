@@ -19,20 +19,12 @@ class STTConfig:
         if not isinstance(self.settings, dict):
             raise ValueError("Settings must be a dictionary")
 
-        # Azure-specific validation
-        if self.provider == "azure":
-            required_fields = ["LANGUAGE", "CONTINUOUS_RECOGNITION"]
-            for field in required_fields:
-                if field not in self.settings:
-                    raise ValueError(f"Missing required field for Azure STT: {field}")
-        
+        # Only validate Deepgram settings since it's the only provider we're using
+        if self.provider != "deepgram":
+            raise ValueError("Only Deepgram STT provider is supported")
+            
         # Deepgram-specific validation
-        elif self.provider == "deepgram":
-            required_fields = ["LANGUAGE", "MODEL", "SAMPLE_RATE"]
-            for field in required_fields:
-                if field not in self.settings:
-                    raise ValueError(f"Missing required field for Deepgram STT: {field}")
-
-        # Add validation for other providers as they are implemented
-        # elif self.provider == "other_provider":
-        #     pass
+        required_fields = ["LANGUAGE", "MODEL", "SAMPLE_RATE"]
+        for field in required_fields:
+            if field not in self.settings:
+                raise ValueError(f"Missing required field for Deepgram STT: {field}")

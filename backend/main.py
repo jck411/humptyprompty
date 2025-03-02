@@ -29,7 +29,8 @@ from backend.models.openaisdk import validate_messages_for_ws, stream_openai_com
 from backend.tts.processor import process_streams
 from backend.endpoints.api import router as api_router
 from backend.wakewords.detector import start_wake_word_thread
-from backend.stt.provider import stt_instance
+from backend.stt.deepgram_stt import DeepgramSTTProvider
+from backend.stt.config import STTConfig
 from backend.endpoints.state import TTS_STOP_EVENT, GEN_STOP_EVENT
 
 from contextlib import asynccontextmanager
@@ -40,8 +41,6 @@ import logging
 from typing import Dict, Optional, Set
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from backend.config.config import CONFIG
-from backend.stt.provider import stt_instance, create_stt_instance
-from backend.endpoints.api import router
 from backend.endpoints.state import GEN_STOP_EVENT, TTS_STOP_EVENT
 
 # ------------------------------------------------------------------------------
@@ -49,6 +48,14 @@ from backend.endpoints.state import GEN_STOP_EVENT, TTS_STOP_EVENT
 # ------------------------------------------------------------------------------
 load_dotenv()
 client, DEPLOYMENT_NAME = setup_chat_client()
+
+# Initialize the STT instance
+stt_config = STTConfig(
+    provider="deepgram",
+    settings=CONFIG["STT_MODELS"]["DEEPGRAM_STT"],
+    enabled=CONFIG["GENERAL_AUDIO"]["STT_ENABLED"]
+)
+stt_instance = DeepgramSTTProvider(stt_config)
 
 def shutdown():
     pass

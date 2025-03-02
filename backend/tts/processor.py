@@ -3,7 +3,6 @@ import logging
 from typing import Optional, Callable
 
 from backend.config.config import CONFIG
-from backend.stt.provider import stt_instance
 
 logger = logging.getLogger(__name__)
 

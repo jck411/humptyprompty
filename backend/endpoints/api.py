@@ -1,9 +1,15 @@
 import logging
 from fastapi import APIRouter, HTTPException, Response
 from backend.config.config import CONFIG
-from backend.stt.provider import stt_instance, create_stt_instance
+from backend.stt.deepgram_stt import DeepgramSTTProvider
 from backend.stt.base import STTState
 from backend.endpoints.state import GEN_STOP_EVENT, TTS_STOP_EVENT
+
+# Create a function to get the stt_instance to avoid circular imports
+def get_stt_instance():
+    # Import here to avoid circular imports
+    from backend.main import stt_instance
+    return stt_instance
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api")
@@ -18,6 +24,7 @@ async def start_stt_endpoint():
     If STT is currently paused, this starts listening again.
     Otherwise it does nothing.
     """
+    stt_instance = get_stt_instance()
     print(f"Starting STT - Current state: {stt_instance.state}, Is listening: {stt_instance.is_listening}, Enabled: {CONFIG['GENERAL_AUDIO']['STT_ENABLED']}")
     if not stt_instance.is_listening:
         await stt_instance.start_listening()
@@ -29,6 +36,7 @@ async def pause_stt_endpoint():
     If STT is currently listening, this pauses it.
     Otherwise it does nothing.
     """
+    stt_instance = get_stt_instance()
     print(f"Pausing STT - Current state: {stt_instance.state}, Is listening: {stt_instance.is_listening}, Enabled: {CONFIG['GENERAL_AUDIO']['STT_ENABLED']}")
     if stt_instance.is_listening:
         stt_instance.pause_listening()
@@ -41,6 +49,7 @@ async def toggle_stt_enabled():
     When disabled, no STT provider will process audio regardless of other settings.
     """
     try:
+        stt_instance = get_stt_instance()
         # Update the global config
         new_state = not CONFIG["GENERAL_AUDIO"]["STT_ENABLED"]
         CONFIG["GENERAL_AUDIO"]["STT_ENABLED"] = new_state
@@ -93,42 +102,3 @@ async def stop_generation():
     """
     GEN_STOP_EVENT.set()
     return {"detail": "Generation stop event triggered. Ongoing text generation will exit soon."}
-
-@router.post("/switch-stt-provider/{provider}")
-async def switch_stt_provider(provider: str):
-    """
-    Switch the STT provider at runtime.
-    Provider can be 'azure' or 'deepgram'.
-    """
-    global stt_instance
-    try:
-        provider = provider.lower()
-        if provider not in ["azure", "deepgram"]:
-            raise HTTPException(status_code=400, detail="Invalid provider. Must be 'azure' or 'deepgram'")
-
-        # Update the global config
-        CONFIG["STT_MODELS"]["PROVIDER"] = provider
-        
-        # Store the current listening state
-        was_listening = stt_instance.is_listening
-        
-        # If currently listening, pause first
-        if was_listening:
-            stt_instance.pause_listening()
-        
-        # Create new instance with updated provider
-        stt_instance = create_stt_instance()
-        
-        # Restore listening state if it was listening before
-        if was_listening and CONFIG["GENERAL_AUDIO"]["STT_ENABLED"]:
-            await stt_instance.start_listening()
-            
-        return {
-            "detail": f"STT provider switched to {provider}",
-            "provider": provider,
-            "is_listening": stt_instance.is_listening,
-            "is_enabled": CONFIG["GENERAL_AUDIO"]["STT_ENABLED"]
-        }
-    except Exception as e:
-        print(f"Error switching STT provider: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to switch STT provider: {str(e)}")

@@ -50,9 +50,9 @@ CONFIG: Dict[str, Any] = {
         "CHARACTER_MAXIMUM": 50,  # will only segment for the initial characters listed here, the rest will just stream
     },
     "TTS_MODELS": {
-        "PROVIDER": "azure",  # default provider
+        "PROVIDER": "azure",  # "azure" or "openai"
         "OPENAI_TTS": {
-            "TTS_CHUNK_SIZE": 8192,  # Increased from 4096 for smoother streaming
+            "TTS_CHUNK_SIZE": 8192,
             "TTS_SPEED": 1.0,
             "TTS_VOICE": "alloy",
             "TTS_MODEL": "tts-1",
@@ -63,7 +63,7 @@ CONFIG: Dict[str, Any] = {
                 "wav": 48000
             },
             "PLAYBACK_RATE": 24000,
-            "BUFFER_SIZE": 16384  # Added buffer size for smoother playback
+            "BUFFER_SIZE": 16384
         },
         "AZURE_TTS": {
             "TTS_SPEED": "0%",
@@ -93,21 +93,7 @@ CONFIG: Dict[str, Any] = {
         "RATE": 24000,
     },
     "STT_MODELS": {
-        "PROVIDER": "deepgram",  # default provider
-        "AZURE_STT": {
-            "LANGUAGE": "en-US",
-            "CONTINUOUS_RECOGNITION": True,
-            "PROFANITY_OPTION": "raw",
-            "AUTO_PUNCTUATION": True,
-            "INTERIM_RESULTS": False,
-        },
-        "OPENAI_STT": {
-            "LANGUAGE": "en-US",
-            "MODEL": "whisper-1",
-            "CHUNK_SIZE": 1024,
-            "AUDIO_FORMAT": "pcm",
-            # Additional OpenAI-specific settings can be added here
-        },
+        "PROVIDER": "deepgram",  # Only provider available
         "DEEPGRAM_STT": {
             "LANGUAGE": "en-US",
             "MODEL": "nova-2",
@@ -122,11 +108,9 @@ CONFIG: Dict[str, Any] = {
     },
     "LOGGING": {
         "PRINT_SEGMENTS": True,
-        "PRINT_TOOL_CALLS": False,
-        "PRINT_FUNCTION_CALLS": False
+        "PRINT_TOOL_CALLS": True,
+        "PRINT_FUNCTION_CALLS": True
     },
-    "TTS_PROVIDER": "ELEVENLABS",  # "ELEVENLABS" or "AZURE" or "COQUI"
-    "TTS_VOICE": "default",
 }
 
 def setup_chat_client():
