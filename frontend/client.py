@@ -428,7 +428,7 @@ class ChatWindow(QMainWindow):
         # Async tasks
         QTimer.singleShot(0, lambda: asyncio.create_task(self._init_states_async()))
 
-        self.theme_toggle.setIcon(QIcon("/home/jack/humptyprompty/frontend/icons/light_mode.svg"))
+        self.theme_toggle.setIcon(QIcon("frontend/icons/light_mode.svg"))
 
     async def _init_states_async(self):
         """
@@ -480,7 +480,7 @@ class ChatWindow(QMainWindow):
         # Theme toggle on the right
         self.theme_toggle = QPushButton()
         self.theme_toggle.setFixedSize(45, 45)
-        self.theme_toggle.setIcon(QIcon("/home/jack/humptyprompty/frontend/icons/dark_mode_24dp_E8EAED.svg"))
+        self.theme_toggle.setIcon(QIcon("frontend/icons/dark_mode.svg"))
         self.theme_toggle.setIconSize(QSize(35, 35))
         self.theme_toggle.clicked.connect(self.toggle_theme)
         self.theme_toggle.setStyleSheet("""
@@ -545,12 +545,12 @@ class ChatWindow(QMainWindow):
 
         send_button = QPushButton()
         send_button.setFixedSize(50, 50)
-        send_button.setIcon(QIcon("/home/jack/humptyprompty/frontend/icons/send.svg"))
-        send_button.setIconSize(QSize(20, 20))
+        send_button.setIcon(QIcon("frontend/icons/send.svg"))
+        send_button.setIconSize(QSize(24, 24))
 
         self.stop_all_button = QPushButton()
         self.stop_all_button.setFixedSize(50, 50)
-        self.stop_all_button.setIcon(QIcon("/home/jack/humptyprompty/frontend/icons/stop_all.svg"))
+        self.stop_all_button.setIcon(QIcon("frontend/icons/stop_all.svg"))
         self.stop_all_button.setIconSize(QSize(30, 30))
 
         button_layout.addWidget(send_button)
@@ -627,11 +627,8 @@ class ChatWindow(QMainWindow):
         global COLORS
         COLORS = DARK_COLORS if self.is_dark_mode else LIGHT_COLORS
 
-        icon_path = (
-            "/home/jack/humptyprompty/frontend/icons/light_mode.svg"
-            if self.is_dark_mode
-            else "/home/jack/humptyprompty/frontend/icons/dark_mode.svg"
-        )
+        icon_path = "frontend/icons/light_mode.svg" if self.is_dark_mode \
+            else "frontend/icons/dark_mode.svg"
         self.theme_toggle.setIcon(QIcon(icon_path))
 
         # Update background on chat & scroll

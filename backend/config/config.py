@@ -40,7 +40,6 @@ CONFIG: Dict[str, Any] = {
     },
     "GENERAL_AUDIO": {
         "TTS_ENABLED": True,
-        "STT_ENABLED": True,
         "WAKEWORD_ENABLED": False,  # Enable/disable wake word detection
     },
     "PROCESSING_PIPELINE": {
@@ -90,20 +89,6 @@ CONFIG: Dict[str, Any] = {
         "FORMAT": 16,
         "CHANNELS": 1,
         "RATE": 24000,
-    },
-    "STT_MODELS": {
-        "PROVIDER": "deepgram",  # Only provider available
-        "DEEPGRAM_STT": {
-            "LANGUAGE": "en-US",
-            "MODEL": "nova-2",
-            "SAMPLE_RATE": 16000,
-            "SMART_FORMAT": True,
-            "INTERIM_RESULTS": True,
-            "ENCODING": "linear16",
-            "CHANNELS": 1,
-            "ENDPOINTING": True,
-            "UTTERANCE_END_MS": 1000
-        }
     },
     "LOGGING": {
         "PRINT_SEGMENTS": True,
