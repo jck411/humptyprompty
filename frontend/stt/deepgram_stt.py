@@ -3,10 +3,14 @@ import os
 import asyncio
 import json
 import sounddevice as sd
+import logging
 from deepgram import DeepgramClient, LiveOptions, LiveTranscriptionEvents
 from PyQt6.QtCore import QObject, pyqtSignal
 from dotenv import load_dotenv
 from .config import AUDIO_CONFIG, DEEPGRAM_CONFIG, STT_CONFIG
+
+# Configure logging to show only warnings and errors
+logging.basicConfig(level=logging.WARNING)
 
 # Load environment variables
 load_dotenv()
@@ -44,7 +48,7 @@ class DeepgramSTT(QObject):
         self.dg_connection = None
         self.stream = None
 
-        print("DeepgramSTT initialized with config:", DEEPGRAM_CONFIG)
+        logging.debug("DeepgramSTT initialized with config: %s", DEEPGRAM_CONFIG)
 
         # Auto-start if configured
         if STT_CONFIG['auto_start'] and self.is_enabled:
@@ -55,7 +59,7 @@ class DeepgramSTT(QObject):
         self.dg_connection = self.deepgram.listen.asyncwebsocket.v("1")
 
         async def on_open(client, *args, **kwargs):
-            print("Deepgram connection established")
+            logging.debug("Deepgram connection established")
         self.dg_connection.on(LiveTranscriptionEvents.Open, on_open)
 
         async def on_close(client, *args, **kwargs):
@@ -63,7 +67,7 @@ class DeepgramSTT(QObject):
         self.dg_connection.on(LiveTranscriptionEvents.Close, on_close)
 
         async def on_warning(client, warning, **kwargs):
-            print("Deepgram warning:", warning)
+            logging.warning("Deepgram warning: %s", warning)
         self.dg_connection.on(LiveTranscriptionEvents.Warning, on_warning)
 
         async def on_error(client, error, **kwargs):
@@ -74,33 +78,33 @@ class DeepgramSTT(QObject):
             try:
                 transcript = result.channel.alternatives[0].transcript
                 if transcript.strip():
-                    print(f"Transcript: {transcript}")
+                    logging.debug("Transcript: %s", transcript)
                     self.transcription_received.emit(transcript)
             except Exception as e:
-                print(f"Error processing transcript: {str(e)}")
+                logging.error("Error processing transcript: %s", str(e))
         self.dg_connection.on(LiveTranscriptionEvents.Transcript, on_transcript)
 
     def audio_callback(self, indata, frames, time, status):
         """Captures microphone audio and sends it to Deepgram unless paused."""
         if status:
-            print(f"Audio callback status: {status}")
+            logging.warning("Audio callback status: %s", status)
             return
 
         if self.is_listening and self.is_enabled and not self.is_paused and self.dg_connection:
             try:
-                # Debug: print first sample of the block (after conversion)
-                # Convert float32 audio (range [-1, 1]) to int16 for "linear16" encoding
+                # Convert float32 audio (range [-1, 1]) to int16 for "linear16" encoding if necessary
                 if AUDIO_CONFIG['dtype'] == 'float32':
                     indata_int16 = (indata * 32767).astype('int16')
                 else:
                     indata_int16 = indata
-                print(f"Captured audio block: frames={frames}, first sample={indata_int16[0][0] if frames>0 else 'N/A'}")
+                logging.debug("Captured audio block: frames=%s, first sample=%s", 
+                              frames, indata_int16[0][0] if frames > 0 else 'N/A')
                 # Schedule sending the audio data on the main event loop
                 self.loop.call_soon_threadsafe(
                     asyncio.create_task, self.dg_connection.send(indata_int16.tobytes())
                 )
             except Exception as e:
-                print(f"Error in audio callback: {str(e)}")
+                logging.error("Error in audio callback: %s", str(e))
 
     async def _async_start(self):
         """Starts STT asynchronously (opens WebSocket and audio stream)."""
@@ -120,9 +124,9 @@ class DeepgramSTT(QObject):
             self.stream.start()
             self.is_listening = True
             self.state_changed.emit(True)
-            print("STT started")
+            logging.debug("STT started")
         except Exception as e:
-            print(f"Error starting STT: {str(e)}")
+            logging.error("Error starting STT: %s", str(e))
             self.set_enabled(False)
 
     async def _async_stop(self):
@@ -137,20 +141,20 @@ class DeepgramSTT(QObject):
                 self.dg_connection = None
             self.is_listening = False
             self.state_changed.emit(False)
-            print("STT stopped")
+            logging.debug("STT stopped")
         except Exception as e:
-            print(f"Error stopping STT: {str(e)}")
+            logging.error("Error stopping STT: %s", str(e))
 
     async def _keep_alive_loop(self, interval: float = 5.0):
         """Sends keep-alive messages while STT is paused."""
-        print("Keep-alive loop started.")
+        logging.debug("Keep-alive loop started.")
         try:
             while self.is_paused and self.dg_connection:
                 await self.dg_connection.send(json.dumps({"type": "KeepAlive"}))
                 await asyncio.sleep(interval)
         except asyncio.CancelledError:
-            print("Keep-alive loop cancelled.")
-        print("Keep-alive loop ended.")
+            logging.debug("Keep-alive loop cancelled.")
+        logging.debug("Keep-alive loop ended.")
 
     def set_enabled(self, enabled: bool):
         """Globally enable or disable STT."""
@@ -180,11 +184,11 @@ class DeepgramSTT(QObject):
                 self._keep_alive_task = None
 
     def _handle_error(self, error):
-        print(f"Deepgram error: {error}")
+        logging.error("Deepgram error: %s", error)
         self.set_enabled(False)
 
     def _handle_close(self):
-        print("Deepgram connection closed")
+        logging.debug("Deepgram connection closed")
         self.set_enabled(False)
 
     def toggle(self):
