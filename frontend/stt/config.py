@@ -13,7 +13,7 @@ AUDIO_CONFIG = {
     'channels': 1,
     'sample_rate': 16000,
     'block_size': 4000,
-    'dtype': 'float32'  # Used by sounddevice
+    'dtype': 'float32',  # Used by sounddevice
 }
 
 # Deepgram configuration
@@ -32,12 +32,12 @@ DEEPGRAM_CONFIG = {
     'interim_results': True,
     'endpointing': True,
     'utterance_end_ms': 1000,
-    
-    # Additional features (commented out by default)
-    # 'punctuate': True,      # Add punctuation
-    # 'diarize': False,       # Speaker diarization
-    # 'numerals': False,      # Convert numbers to digits
-    # 'profanity_filter': False,  # Filter profanity
-    # 'keywords': [],         # Keywords to detect
-    # 'replace': [],         # Word replacements
-} 
+
+    # Additional features (disabled by default)
+    'punctuate': False,      # Add punctuation automatically
+    'diarize': False,       # Enable speaker diarization
+    'numerals': False,      # Convert numbers to digits
+    'profanity_filter': False,  # Filter profanity
+    'keywords': [],         # Detect specific keywords
+    'replace': [],         # Replace words
+}

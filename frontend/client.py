@@ -56,14 +56,8 @@ LIGHT_COLORS = {
     "input_border": "#D3D7DC"       
 }
 
-
 def generate_main_stylesheet(colors):
-    """
-    Return the main stylesheet based on the provided color scheme.
-    Added a Raspberry Pi-friendly default font (DejaVu Sans) with fallback.
-    """
     return f"""
-    /* Global font selection: DejaVu Sans, fallback to sans-serif */
     QWidget {{
         font-family: 'DejaVu Sans', 'sans-serif';
         background-color: {colors['background']};
@@ -128,10 +122,6 @@ def generate_main_stylesheet(colors):
     """
 
 def get_message_bubble_stylesheet(is_user, colors):
-    """
-    Return the stylesheet for a message bubble.
-    For user messages, we use a subtle bubble; for assistant messages, no background bubble.
-    """
     if is_user:
         return f"""
             QFrame#messageBubble {{
@@ -160,29 +150,25 @@ def get_message_bubble_stylesheet(is_user, colors):
             }}
         """
 
-
 # -----------------------------------------------------------------------------
 #                           CONFIGURATION
 # -----------------------------------------------------------------------------
-SERVER_HOST = "127.0.0.1"  # Adjust as needed
+SERVER_HOST = "127.0.0.1"
 SERVER_PORT = 8000
 WEBSOCKET_PATH = "/ws/chat"
 HTTP_BASE_URL = f"http://{SERVER_HOST}:{SERVER_PORT}"
 
-# Start with dark mode
 COLORS = DARK_COLORS
-
 
 # -----------------------------------------------------------------------------
 #                           LOGGER SETUP
 # -----------------------------------------------------------------------------
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.WARNING)  # DEBUG for detailed logs
+logger.setLevel(logging.WARNING)
 ch = logging.StreamHandler()
 formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 ch.setFormatter(formatter)
 logger.addHandler(ch)
-
 
 # -----------------------------------------------------------------------------
 #                           COMPONENTS & UTILS
@@ -202,11 +188,7 @@ class MessageBubble(QFrame):
     def update_text(self, new_text):
         self.label.setText(new_text)
 
-
 class CustomTextEdit(QTextEdit):
-    """
-    Sends the message on Enter (unless Shift is held).
-    """
     def __init__(self, parent=None):
         super().__init__(parent)
 
@@ -217,7 +199,6 @@ class CustomTextEdit(QTextEdit):
                 main_window.send_message()
         else:
             super().keyPressEvent(event)
-
 
 # -----------------------------------------------------------------------------
 #                       ASYNC WEBSOCKET CLIENT
@@ -263,7 +244,6 @@ class AsyncWebSocketClient(QObject):
                             data = json.loads(message)
                             logger.debug(f"Received message: {data}")
                             
-                            # Process STT messages first as highest priority
                             msg_type = data.get("type")
                             if msg_type == "stt":
                                 stt_text = data.get("stt_text", "")
@@ -282,7 +262,7 @@ class AsyncWebSocketClient(QObject):
                             logger.error(f"Raw message: {message}")
                 except Exception as e:
                     logger.error(f"WebSocket message processing error: {e}")
-                    await asyncio.sleep(0.1)  # Prevent tight loop on error
+                    await asyncio.sleep(0.1)
                     continue
         except Exception as e:
             logger.error(f"WebSocket connection error: {e}")
@@ -300,14 +280,10 @@ class AsyncWebSocketClient(QObject):
     def handle_assistant_message(self, message):
         self.messages.append({"sender": "assistant", "text": message})
 
-
 # -----------------------------------------------------------------------------
 #                              AUDIO SETUP
 # -----------------------------------------------------------------------------
 class QueueAudioDevice(QIODevice):
-    """
-    QIODevice for buffering PCM audio data.
-    """
     def __init__(self):
         super().__init__()
         self.audio_buffer = bytearray()
@@ -353,7 +329,6 @@ class QueueAudioDevice(QIODevice):
             self.last_read_empty = False
             logger.info("[QueueAudioDevice] Audio buffer cleared and state reset")
 
-
 def setup_audio():
     audio_format = QAudioFormat()
     audio_format.setSampleRate(24000)
@@ -376,7 +351,6 @@ def setup_audio():
     logger.info("Audio sink started with audio device")
     return audio_sink, audio_device
 
-
 # -----------------------------------------------------------------------------
 #                           MAIN CHAT WINDOW
 # -----------------------------------------------------------------------------
@@ -384,7 +358,6 @@ class ChatWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         
-        # Central widget & main layout
         main_widget = QWidget()
         self.setCentralWidget(main_widget)
         self.main_layout = QVBoxLayout(main_widget)
@@ -394,16 +367,13 @@ class ChatWindow(QMainWindow):
         self.setWindowTitle("Modern Chat Interface")
         self.setMinimumSize(800, 600)
         
-        # Default: dark mode
         self.is_dark_mode = True
         global COLORS
         COLORS = DARK_COLORS
         
-        # In-progress assistant message
         self.assistant_text_in_progress = ""
         self.assistant_bubble_in_progress = None
 
-        # STT states
         self.stt_listening = False
         self.stt_enabled = False
         self.is_toggling_stt = False
@@ -411,29 +381,22 @@ class ChatWindow(QMainWindow):
         # Initialize frontend STT
         self.frontend_stt = DeepgramSTT()
 
-        # UI components
         self.setup_top_buttons_layout()
         self.setup_chat_area_layout()
         self.setup_input_area_layout()
 
-        # Websocket + audio
         self.setup_websocket()
         self.setup_audio()
         self.apply_styling()
         
-        # Connect frontend STT signals
+        # Connect STT signals
         self.frontend_stt.transcription_received.connect(self.handle_frontend_stt_text)
         self.frontend_stt.state_changed.connect(self.handle_frontend_stt_state)
 
-        # Async tasks
         QTimer.singleShot(0, lambda: asyncio.create_task(self._init_states_async()))
-
         self.theme_toggle.setIcon(QIcon("frontend/icons/light_mode.svg"))
 
     async def _init_states_async(self):
-        """
-        Get the initial TTS state from server.
-        """
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.post(f"{HTTP_BASE_URL}/api/toggle-tts") as resp:
@@ -443,7 +406,6 @@ class ChatWindow(QMainWindow):
         except Exception as e:
             logger.error(f"Error getting initial TTS state: {e}")
             self.tts_enabled = False
-
         self.is_toggling_tts = False
 
     def setup_top_buttons_layout(self):
@@ -452,7 +414,6 @@ class ChatWindow(QMainWindow):
         top_layout.setContentsMargins(0, 5, 0, 0)
         top_layout.setSpacing(5)
         
-        # Left-aligned container
         left_buttons = QWidget()
         left_layout = QHBoxLayout(left_buttons)
         left_layout.setContentsMargins(0, 0, 0, 0)
@@ -477,7 +438,6 @@ class ChatWindow(QMainWindow):
 
         top_layout.addWidget(left_buttons, stretch=1)
 
-        # Theme toggle on the right
         self.theme_toggle = QPushButton()
         self.theme_toggle.setFixedSize(45, 45)
         self.theme_toggle.setIcon(QIcon("frontend/icons/dark_mode.svg"))
@@ -496,8 +456,6 @@ class ChatWindow(QMainWindow):
         top_layout.addWidget(self.theme_toggle)
 
         self.main_layout.addWidget(self.top_widget)
-
-        # Connect buttons using asyncio.create_task for async handling
         self.toggle_tts_button.clicked.connect(lambda: asyncio.create_task(self.toggle_tts_async()))
 
     def setup_chat_area_layout(self):
@@ -560,7 +518,6 @@ class ChatWindow(QMainWindow):
         input_layout.addWidget(button_widget)
 
         self.main_layout.addWidget(input_widget)
-
         send_button.clicked.connect(self.send_message)
         self.text_input.textChanged.connect(self.adjust_text_input_height)
         self.stop_all_button.clicked.connect(lambda: asyncio.create_task(self.stop_tts_and_generation_async()))
@@ -578,13 +535,11 @@ class ChatWindow(QMainWindow):
         self.audio_sink.stateChanged.connect(self.handle_audio_state_changed)
         self.audio_queue = asyncio.Queue()
 
-        # Timer to feed audio data
         self.audio_timer = QTimer()
         self.audio_timer.setInterval(50)
         self.audio_timer.timeout.connect(self.feed_audio_data)
         self.audio_timer.start()
 
-        # Timer to check for idle states
         self.state_monitor_timer = QTimer()
         self.state_monitor_timer.setInterval(200)
         self.state_monitor_timer.timeout.connect(self.check_audio_state)
@@ -627,23 +582,16 @@ class ChatWindow(QMainWindow):
         global COLORS
         COLORS = DARK_COLORS if self.is_dark_mode else LIGHT_COLORS
 
-        icon_path = "frontend/icons/light_mode.svg" if self.is_dark_mode \
-            else "frontend/icons/dark_mode.svg"
+        icon_path = "frontend/icons/light_mode.svg" if self.is_dark_mode else "frontend/icons/dark_mode.svg"
         self.theme_toggle.setIcon(QIcon(icon_path))
-
-        # Update background on chat & scroll
         self.chat_area.setStyleSheet(f"background-color: {COLORS['background']};")
         scroll_area = self.findChild(QScrollArea)
         scroll_area.setStyleSheet(f"background-color: {COLORS['background']};")
-
-        # Update existing bubbles
         for i in range(self.chat_layout.count()):
             widget = self.chat_layout.itemAt(i).widget()
             if widget and widget.__class__.__name__ == "MessageBubble":
                 is_user = widget.property("isUser")
                 widget.setStyleSheet(get_message_bubble_stylesheet(is_user, COLORS))
-
-        # Finally apply the updated stylesheet
         self.apply_styling()
 
     def send_message(self):
@@ -721,10 +669,6 @@ class ChatWindow(QMainWindow):
             self.is_toggling_tts = False
 
     async def stop_tts_and_generation_async(self):
-        """
-        Stops both TTS and text generation by making API calls to the backend.
-        Also cleans up local audio buffers and stops audio immediately.
-        """
         logger.info("Stop button pressed - stopping TTS and generation")
         try:
             async with aiohttp.ClientSession() as session:
@@ -737,7 +681,6 @@ class ChatWindow(QMainWindow):
         except Exception as e:
             logger.error(f"Error stopping TTS and generation on server: {e}")
 
-        # Clean up local audio resources
         logger.info("Cleaning frontend audio resources")
         current_state = self.audio_sink.state()
         logger.info(f"Audio sink state before stopping: {current_state}")
@@ -800,16 +743,12 @@ class ChatWindow(QMainWindow):
                             logger.info("[feed_audio_data] Buffer empty at end-of-stream, stopping audio sink")
                             self.audio_sink.stop()
                         break
-                        
                     bytes_written = self.audio_device.writeData(pcm_chunk)
                     logger.debug(f"[feed_audio_data] Wrote {bytes_written} bytes to audio device")
-                    
                 except asyncio.QueueEmpty:
                     break
-                    
             if chunks_processed >= chunk_limit and not self.audio_queue.empty():
                 QTimer.singleShot(1, self.feed_audio_data)
-                
         except Exception as e:
             logger.error(f"Error in feed_audio_data: {e}")
             logger.exception("Stack trace:")
@@ -818,41 +757,28 @@ class ChatWindow(QMainWindow):
         super().keyPressEvent(event)
 
     def clear_chat_history(self):
-        """
-        Clears all chat bubbles from the chat area,
-        resets any in-progress assistant message,
-        and clears the internal conversation history.
-        """
-        # Remove all items from the chat layout
         while self.chat_layout.count():
             item = self.chat_layout.takeAt(0)
             widget = item.widget()
             if widget is not None:
                 widget.deleteLater()
-        # Re-add the stretch to keep proper spacing
         self.chat_layout.addStretch()
-        
-        # Reset any in-progress assistant message
         self.assistant_text_in_progress = ""
         self.assistant_bubble_in_progress = None
-        
-        # Clear the conversation history stored in the websocket client
         self.ws_client.messages.clear()
         logger.info("Chat history cleared, starting with a blank slate.")
 
     def toggle_stt(self):
-        """Toggle STT on/off using the frontend implementation."""
+        """Toggle global STT using the frontend implementation."""
         self.frontend_stt.toggle()
-        
+
     def handle_frontend_stt_text(self, text):
-        """Handle transcription text from frontend STT."""
         if text.strip():
             print(f"Frontend STT text: {text}")
             self.text_input.setPlainText(text)
             self.adjust_text_input_height()
-            
+
     def handle_frontend_stt_state(self, is_listening):
-        """Handle state changes from frontend STT."""
         self.stt_listening = is_listening
         self.toggle_stt_button.setText(f"STT {'On' if is_listening else 'Off'}")
         self.toggle_stt_button.setProperty("isListening", is_listening)
