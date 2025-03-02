@@ -4,6 +4,7 @@ import json
 import asyncio
 import aiohttp
 import logging
+import os
 
 # PyQt6 Imports
 from PyQt6.QtWidgets import (
@@ -22,6 +23,9 @@ from PyQt6.QtMultimedia import (
 
 # qasync integration
 from qasync import QEventLoop
+
+# Import our frontend STT implementation
+from frontend.stt.deepgram_stt import DeepgramSTT
 
 # -----------------------------------------------------------------------------
 #                               THEMING & COLORS
@@ -403,6 +407,9 @@ class ChatWindow(QMainWindow):
         self.stt_listening = False
         self.stt_enabled = False
         self.is_toggling_stt = False
+        
+        # Initialize frontend STT
+        self.frontend_stt = DeepgramSTT()
 
         # UI components
         self.setup_top_buttons_layout()
@@ -413,6 +420,10 @@ class ChatWindow(QMainWindow):
         self.setup_websocket()
         self.setup_audio()
         self.apply_styling()
+        
+        # Connect frontend STT signals
+        self.frontend_stt.transcription_received.connect(self.handle_frontend_stt_text)
+        self.frontend_stt.state_changed.connect(self.handle_frontend_stt_state)
 
         # Async tasks
         QTimer.singleShot(0, lambda: asyncio.create_task(self._init_states_async()))
@@ -450,6 +461,7 @@ class ChatWindow(QMainWindow):
         self.toggle_stt_button = QPushButton("STT Off")
         self.toggle_stt_button.setFixedSize(120, 40)
         self.toggle_stt_button.setObjectName("sttButton")
+        self.toggle_stt_button.clicked.connect(self.toggle_stt)
 
         self.toggle_tts_button = QPushButton("TTS On" if getattr(self, 'tts_enabled', False) else "TTS Off")
         self.toggle_tts_button.setFixedSize(120, 40)
@@ -830,6 +842,25 @@ class ChatWindow(QMainWindow):
         # Clear the conversation history stored in the websocket client
         self.ws_client.messages.clear()
         logger.info("Chat history cleared, starting with a blank slate.")
+
+    def toggle_stt(self):
+        """Toggle STT on/off using the frontend implementation."""
+        self.frontend_stt.toggle()
+        
+    def handle_frontend_stt_text(self, text):
+        """Handle transcription text from frontend STT."""
+        if text.strip():
+            print(f"Frontend STT text: {text}")
+            self.text_input.setPlainText(text)
+            self.adjust_text_input_height()
+            
+    def handle_frontend_stt_state(self, is_listening):
+        """Handle state changes from frontend STT."""
+        self.stt_listening = is_listening
+        self.toggle_stt_button.setText(f"STT {'On' if is_listening else 'Off'}")
+        self.toggle_stt_button.setProperty("isListening", is_listening)
+        self.toggle_stt_button.style().unpolish(self.toggle_stt_button)
+        self.toggle_stt_button.style().polish(self.toggle_stt_button)
 
 # -----------------------------------------------------------------------------
 #                                 MAIN

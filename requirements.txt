@@ -9,4 +9,6 @@ python-multipart==0.0.6
 timezonefinder==6.2.0
 pytz==2023.3.post1
 aiohttp==3.9.1
+sounddevice==0.4.6
+numpy==1.24.3
 deepgram-sdk==2.12.0
