@@ -486,7 +486,6 @@ class ChatWindow(QMainWindow):
         self.main_layout.addWidget(self.top_widget)
 
         # Connect buttons using asyncio.create_task for async handling
-        self.toggle_stt_button.clicked.connect(lambda: asyncio.create_task(self.toggle_stt()))
         self.toggle_tts_button.clicked.connect(lambda: asyncio.create_task(self.toggle_tts_async()))
 
     def setup_chat_area_layout(self):
@@ -557,8 +556,6 @@ class ChatWindow(QMainWindow):
     def setup_websocket(self):
         self.ws_client = AsyncWebSocketClient(SERVER_HOST, SERVER_PORT, WEBSOCKET_PATH)
         self.ws_client.message_received.connect(self.handle_message)
-        self.ws_client.stt_text_received.connect(self.handle_stt_text)
-        self.ws_client.stt_state_received.connect(self.handle_stt_state)
         self.ws_client.connection_status.connect(self.handle_connection_status)
         self.ws_client.audio_received.connect(self.on_audio_received)
         self.ws_client.tts_state_changed.connect(self.handle_tts_state_changed)
@@ -666,19 +663,12 @@ class ChatWindow(QMainWindow):
             self.assistant_text_in_progress = ""
             self.assistant_bubble_in_progress = None
 
-    def handle_stt_text(self, text):
-        self.text_input.setPlainText(text)
-
     def handle_connection_status(self, connected):
         self.setWindowTitle(f"Modern Chat Interface - {'Connected' if connected else 'Disconnected'}")
 
     def handle_tts_state_changed(self, is_enabled: bool):
         self.tts_enabled = is_enabled
         self.toggle_tts_button.setText("TTS On" if is_enabled else "TTS Off")
-
-    def handle_stt_state(self, is_listening: bool):
-        self.stt_listening = is_listening
-        self.update_stt_button_style()
 
     def add_message(self, text, is_user):
         bubble = MessageBubble(text, is_user)
@@ -696,32 +686,6 @@ class ChatWindow(QMainWindow):
         doc_height = self.text_input.document().size().height()
         new_height = min(max(50, doc_height + 20), 100)
         self.text_input.setFixedHeight(int(new_height))
-
-    def update_stt_button_style(self):
-        self.toggle_stt_button.setProperty("isListening", "true" if self.stt_listening else "false")
-        self.toggle_stt_button.style().unpolish(self.toggle_stt_button)
-        self.toggle_stt_button.style().polish(self.toggle_stt_button)
-
-    async def toggle_stt(self):
-        self.is_toggling_stt = True
-        try:
-            if not self.stt_enabled:
-                if self.ws_client.ws:
-                    await self.ws_client.ws.send(json.dumps({"action": "start-stt"}))
-                    self.stt_enabled = True
-                else:
-                    logger.error("WebSocket is not connected; cannot start STT.")
-            else:
-                if self.ws_client.ws:
-                    await self.ws_client.ws.send(json.dumps({"action": "pause-stt"}))
-                    self.stt_enabled = False
-                else:
-                    logger.error("WebSocket is not connected; cannot pause STT.")
-            self.toggle_stt_button.setText("STT On" if self.stt_enabled else "STT Off")
-        except Exception as e:
-            logger.error(f"Error toggling STT: {e}")
-        finally:
-            self.is_toggling_stt = False
 
     async def toggle_tts_async(self):
         self.is_toggling_tts = True
