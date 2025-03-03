@@ -597,10 +597,25 @@ class ChatWindow(QMainWindow):
     # -------------------------- Theming --------------------------
 
     def apply_styling(self):
+        # One-stop shop for setting all style info
         self.setStyleSheet(generate_main_stylesheet(self.colors))
+        
+        # Style the chat area and scroll area
+        self.chat_area.setStyleSheet(f"background-color: {self.colors['background']};")
+        scroll_area = self.findChild(QScrollArea)
+        scroll_area.setStyleSheet(f"background-color: {self.colors['background']};")
+        
+        # Update text input placeholder color
         palette = self.text_input.palette()
         palette.setColor(QPalette.ColorRole.PlaceholderText, QColor(self.colors['text_secondary']))
         self.text_input.setPalette(palette)
+        
+        # Update all message bubbles
+        for i in range(self.chat_layout.count()):
+            widget = self.chat_layout.itemAt(i).widget()
+            if widget and widget.__class__.__name__ == "MessageBubble":
+                is_user = widget.property("isUser")
+                widget.setStyleSheet(get_message_bubble_stylesheet(is_user, self.colors))
 
     def toggle_theme(self):
         """
@@ -610,19 +625,11 @@ class ChatWindow(QMainWindow):
         self.is_dark_mode = not self.is_dark_mode
         self.colors = DARK_COLORS if self.is_dark_mode else LIGHT_COLORS
 
+        # Update theme toggle button icon
         icon_path = "frontend/icons/light_mode.svg" if self.is_dark_mode else "frontend/icons/dark_mode.svg"
         self.theme_toggle.setIcon(QIcon(icon_path))
-        self.chat_area.setStyleSheet(f"background-color: {self.colors['background']};")
-
-        scroll_area = self.findChild(QScrollArea)
-        scroll_area.setStyleSheet(f"background-color: {self.colors['background']};")
-
-        for i in range(self.chat_layout.count()):
-            widget = self.chat_layout.itemAt(i).widget()
-            if widget and widget.__class__.__name__ == "MessageBubble":
-                is_user = widget.property("isUser")
-                widget.setStyleSheet(get_message_bubble_stylesheet(is_user, self.colors))
-
+        
+        # Apply all styling changes
         self.apply_styling()
 
     # -------------------------- Chat Logic --------------------------
