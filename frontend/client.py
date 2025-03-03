@@ -398,8 +398,8 @@ class ChatWindow(QMainWindow):
         # UI State Fields
         self.assistant_text_in_progress = ""
         self.assistant_bubble_in_progress = None
-        self.stt_listening = False
-        self.stt_enabled = False
+        self.stt_listening = True
+        self.stt_enabled = True
         self.is_toggling_stt = False
         self.is_toggling_tts = False
 
@@ -435,6 +435,9 @@ class ChatWindow(QMainWindow):
         QTimer.singleShot(0, lambda: asyncio.create_task(self._init_states_async()))
         self.theme_toggle.setIcon(QIcon("frontend/icons/light_mode.svg"))
 
+        # Add this line to start STT automatically
+        QTimer.singleShot(0, self.toggle_stt)
+
     async def _init_states_async(self):
         """
         Fetches the initial TTS state from the server.
@@ -467,6 +470,7 @@ class ChatWindow(QMainWindow):
         self.toggle_stt_button = QPushButton("STT Off")
         self.toggle_stt_button.setFixedSize(120, 40)
         self.toggle_stt_button.setObjectName("sttButton")
+        self.toggle_stt_button.setProperty("isListening", False)
         self.toggle_stt_button.clicked.connect(self.toggle_stt)
 
         self.toggle_tts_button = QPushButton("TTS On" if getattr(self, 'tts_enabled', False) else "TTS Off")
@@ -692,7 +696,14 @@ class ChatWindow(QMainWindow):
         """
         Toggle global STT using the frontend implementation.
         """
-        self.frontend_stt.toggle()
+        if self.is_toggling_stt:
+            return
+        
+        self.is_toggling_stt = True
+        try:
+            self.frontend_stt.toggle()
+        finally:
+            self.is_toggling_stt = False
 
     def handle_frontend_stt_text(self, text):
         """
@@ -712,6 +723,7 @@ class ChatWindow(QMainWindow):
         self.toggle_stt_button.setProperty("isListening", is_listening)
         self.toggle_stt_button.style().unpolish(self.toggle_stt_button)
         self.toggle_stt_button.style().polish(self.toggle_stt_button)
+        self.toggle_stt_button.update()
 
     # -------------------------- TTS Handling --------------------------
 
