@@ -21,6 +21,14 @@ class DeepgramSTT(QObject):
     
     - Global enable (set_enabled) opens/closes WebSocket and audio stream.
     - Pause (set_paused) stops sending mic audio while keeping the WebSocket open.
+    
+    Can be used as a context manager:
+    ```
+    with DeepgramSTT() as stt:
+        # STT is automatically enabled here
+        # Use stt as needed
+    # STT is automatically disabled when exiting the context
+    ```
     """
 
     # Signals for transcription results and state changes
@@ -36,6 +44,11 @@ class DeepgramSTT(QObject):
 
         # Keep-alive task reference (for paused state)
         self._keep_alive_task = None
+        # Track the start/stop tasks
+        self._start_task = None
+        self._stop_task = None
+        # Flag to track if we're in the process of toggling
+        self._is_toggling = False
 
         # Capture the main event loop (set by qasync in the client)
         self.loop = asyncio.get_event_loop()
@@ -132,18 +145,37 @@ class DeepgramSTT(QObject):
     async def _async_stop(self):
         """Stops STT asynchronously (closes WebSocket and audio stream)."""
         try:
+            # Cancel any pending keep-alive task first
+            if self._keep_alive_task and not self._keep_alive_task.done():
+                self._keep_alive_task.cancel()
+                try:
+                    await self._keep_alive_task
+                except asyncio.CancelledError:
+                    logging.debug("Keep-alive task cancelled during stop")
+                self._keep_alive_task = None
+
             if self.stream:
                 self.stream.stop()
                 self.stream.close()
                 self.stream = None
+
             if self.dg_connection:
-                await self.dg_connection.finish()
+                try:
+                    await self.dg_connection.finish()
+                except asyncio.CancelledError:
+                    logging.debug("Deepgram connection finish cancelled as expected.")
+                except Exception as e:
+                    logging.warning(f"Error during Deepgram connection finish: {e}")
                 self.dg_connection = None
+
             self.is_listening = False
             self.state_changed.emit(False)
             logging.debug("STT stopped")
         except Exception as e:
-            logging.error("Error stopping STT: %s", str(e))
+            logging.error(f"Error stopping STT: {e}")
+        finally:
+            self._stop_task = None
+
 
     async def _keep_alive_loop(self, interval: float = 5.0):
         """Sends keep-alive messages while STT is paused."""
@@ -158,17 +190,34 @@ class DeepgramSTT(QObject):
 
     def set_enabled(self, enabled: bool):
         """Globally enable or disable STT."""
-        if self.is_enabled == enabled:
+        if self.is_enabled == enabled or self._is_toggling:
             return
-        self.is_enabled = enabled
-        self.enabled_changed.emit(enabled)
-        if enabled:
-            asyncio.create_task(self._async_start())
-        else:
-            if self._keep_alive_task:
-                self._keep_alive_task.cancel()
-                self._keep_alive_task = None
-            asyncio.create_task(self._async_stop())
+            
+        self._is_toggling = True
+        try:
+            self.is_enabled = enabled
+            self.enabled_changed.emit(enabled)
+            
+            # Cancel any existing tasks first
+            if self._start_task and not self._start_task.done():
+                self._start_task.cancel()
+                self._start_task = None
+                
+            if self._stop_task and not self._stop_task.done():
+                self._stop_task.cancel()
+                self._stop_task = None
+                
+            if enabled:
+                self._start_task = asyncio.create_task(self._async_start())
+            else:
+                # Cancel keep-alive task if it exists
+                if self._keep_alive_task and not self._keep_alive_task.done():
+                    self._keep_alive_task.cancel()
+                    self._keep_alive_task = None
+                    
+                self._stop_task = asyncio.create_task(self._async_stop())
+        finally:
+            self._is_toggling = False
 
     def set_paused(self, paused: bool):
         """Pause or resume audio streaming (while keeping the WebSocket open)."""
@@ -193,7 +242,18 @@ class DeepgramSTT(QObject):
 
     def toggle(self):
         """Toggle between enabled and disabled states."""
+        # Use set_enabled which now has proper task management
         self.set_enabled(not self.is_enabled)
+        
+    def __enter__(self):
+        """Context manager entry - enables STT."""
+        self.set_enabled(True)
+        return self
+        
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Context manager exit - disables STT."""
+        self.set_enabled(False)
+        return False  # Don't suppress exceptions
 
     def __del__(self):
         self.set_enabled(False)

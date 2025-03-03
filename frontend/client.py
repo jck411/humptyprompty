@@ -29,6 +29,9 @@ from qasync import QEventLoop
 # Import your frontend STT implementation
 from frontend.stt.deepgram_stt import DeepgramSTT
 
+# Add this import for task cancellation handling
+import asyncio.exceptions
+
 # -----------------------------------------------------------------------------
 #                           1. CONFIGURATION & LOGGING
 # -----------------------------------------------------------------------------
@@ -75,7 +78,7 @@ LIGHT_COLORS = {
     "input_border": "#D3D7DC"
 }
 
-COLORS = DARK_COLORS  # Global reference; can be toggled between DARK_COLORS and LIGHT_COLORS
+# No longer using global COLORS - each component manages its own theme
 
 def generate_main_stylesheet(colors):
     return f"""
@@ -301,7 +304,6 @@ class QueueAudioDevice(QIODevice):
         self.mutex = QMutex()
         self.end_of_stream = False
         self.last_read_empty = False
-        # Add state tracking
         self.is_active = False
 
     def open(self, mode):
@@ -394,6 +396,9 @@ class ChatWindow(QMainWindow):
         self.setWindowTitle("Modern Chat Interface")
         self.setMinimumSize(800, 600)
         self.is_dark_mode = True
+        
+        # Theme management - store theme locally instead of using global
+        self.colors = DARK_COLORS
 
         # UI State Fields
         self.assistant_text_in_progress = ""
@@ -423,8 +428,6 @@ class ChatWindow(QMainWindow):
         self.setup_audio()
 
         # Initial Theming
-        global COLORS
-        COLORS = DARK_COLORS
         self.apply_styling()
         
         # Connect STT signals
@@ -435,13 +438,15 @@ class ChatWindow(QMainWindow):
         QTimer.singleShot(0, lambda: asyncio.create_task(self._init_states_async()))
         self.theme_toggle.setIcon(QIcon("frontend/icons/light_mode.svg"))
 
-        # Add this line to start STT automatically
+        # Optionally start STT automatically
         QTimer.singleShot(0, self.toggle_stt)
 
+        # -----------------------------------------------------------------------------
+        #   CHANGED: Defer the creation of the async audio consumer task until the event loop is running
+        # -----------------------------------------------------------------------------
+        QTimer.singleShot(0, lambda: asyncio.create_task(self.audio_consumer()))
+
     async def _init_states_async(self):
-        """
-        Fetches the initial TTS state from the server.
-        """
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.post(f"{HTTP_BASE_URL}/api/toggle-tts") as resp:
@@ -513,7 +518,7 @@ class ChatWindow(QMainWindow):
         self.chat_area.setAutoFillBackground(True)
         self.chat_area.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         chat_palette = self.chat_area.palette()
-        chat_palette.setColor(QPalette.ColorRole.Window, QColor(COLORS['background']))
+        chat_palette.setColor(QPalette.ColorRole.Window, QColor(self.colors['background']))
         self.chat_area.setPalette(chat_palette)
         
         self.chat_layout = QVBoxLayout(self.chat_area)
@@ -530,7 +535,7 @@ class ChatWindow(QMainWindow):
         scroll.setContentsMargins(0, 0, 0, 0)
         scroll.setAutoFillBackground(True)
         scroll_palette = scroll.palette()
-        scroll_palette.setColor(QPalette.ColorRole.Window, QColor(COLORS['background']))
+        scroll_palette.setColor(QPalette.ColorRole.Window, QColor(self.colors['background']))
         scroll.setPalette(scroll_palette)
 
         self.main_layout.addWidget(scroll, stretch=1)
@@ -585,27 +590,16 @@ class ChatWindow(QMainWindow):
     def setup_audio(self):
         self.audio_sink, self.audio_device = setup_audio()
         self.audio_sink.stateChanged.connect(self.handle_audio_state_changed)
+        # This asyncio.Queue will be consumed by self.audio_consumer()
         self.audio_queue = asyncio.Queue()
-
-        # Timers for feeding audio to the device and monitoring state
-        self.audio_timer = QTimer()
-        self.audio_timer.setInterval(50)
-        self.audio_timer.timeout.connect(self.feed_audio_data)
-        self.audio_timer.start()
-
-        self.state_monitor_timer = QTimer()
-        self.state_monitor_timer.setInterval(200)
-        self.state_monitor_timer.timeout.connect(self.check_audio_state)
-        self.state_monitor_timer.start()
-
-        logger.info("Audio setup completed with state monitoring")
+        logger.info("Audio setup completed, using async consumer loop")
 
     # -------------------------- Theming --------------------------
 
     def apply_styling(self):
-        self.setStyleSheet(generate_main_stylesheet(COLORS))
+        self.setStyleSheet(generate_main_stylesheet(self.colors))
         palette = self.text_input.palette()
-        palette.setColor(QPalette.ColorRole.PlaceholderText, QColor(COLORS['text_secondary']))
+        palette.setColor(QPalette.ColorRole.PlaceholderText, QColor(self.colors['text_secondary']))
         self.text_input.setPalette(palette)
 
     def toggle_theme(self):
@@ -614,21 +608,20 @@ class ChatWindow(QMainWindow):
         relevant widgets and message bubbles.
         """
         self.is_dark_mode = not self.is_dark_mode
-        global COLORS
-        COLORS = DARK_COLORS if self.is_dark_mode else LIGHT_COLORS
+        self.colors = DARK_COLORS if self.is_dark_mode else LIGHT_COLORS
 
         icon_path = "frontend/icons/light_mode.svg" if self.is_dark_mode else "frontend/icons/dark_mode.svg"
         self.theme_toggle.setIcon(QIcon(icon_path))
-        self.chat_area.setStyleSheet(f"background-color: {COLORS['background']};")
+        self.chat_area.setStyleSheet(f"background-color: {self.colors['background']};")
 
         scroll_area = self.findChild(QScrollArea)
-        scroll_area.setStyleSheet(f"background-color: {COLORS['background']};")
+        scroll_area.setStyleSheet(f"background-color: {self.colors['background']};")
 
         for i in range(self.chat_layout.count()):
             widget = self.chat_layout.itemAt(i).widget()
             if widget and widget.__class__.__name__ == "MessageBubble":
                 is_user = widget.property("isUser")
-                widget.setStyleSheet(get_message_bubble_stylesheet(is_user, COLORS))
+                widget.setStyleSheet(get_message_bubble_stylesheet(is_user, self.colors))
 
         self.apply_styling()
 
@@ -649,7 +642,7 @@ class ChatWindow(QMainWindow):
         # Accumulate token in the "assistant bubble in progress"
         if not self.assistant_bubble_in_progress:
             self.assistant_bubble_in_progress = MessageBubble("", is_user=False)
-            self.assistant_bubble_in_progress.setStyleSheet(get_message_bubble_stylesheet(False, COLORS))
+            self.assistant_bubble_in_progress.setStyleSheet(get_message_bubble_stylesheet(False, self.colors))
             self.chat_layout.insertWidget(self.chat_layout.count() - 1, self.assistant_bubble_in_progress)
 
         self.assistant_text_in_progress += token
@@ -668,7 +661,7 @@ class ChatWindow(QMainWindow):
 
     def add_message(self, text, is_user):
         bubble = MessageBubble(text, is_user)
-        bubble.setStyleSheet(get_message_bubble_stylesheet(is_user, COLORS))
+        bubble.setStyleSheet(get_message_bubble_stylesheet(is_user, self.colors))
         self.chat_layout.insertWidget(self.chat_layout.count() - 1, bubble)
         self.auto_scroll_chat()
 
@@ -701,7 +694,21 @@ class ChatWindow(QMainWindow):
         
         self.is_toggling_stt = True
         try:
-            self.frontend_stt.toggle()
+            if hasattr(self.frontend_stt, 'toggle'):
+                # Use the existing toggle method
+                self.frontend_stt.toggle()
+                # Update UI state to reflect the opposite of current state
+                self.handle_frontend_stt_state(not self.stt_listening)
+            else:
+                logger.error("Frontend STT implementation missing toggle method")
+                # Still update the UI state as a fallback
+                self.handle_frontend_stt_state(not self.stt_listening)
+        except asyncio.exceptions.CancelledError:
+            logger.warning("STT toggle task was cancelled - this is expected during shutdown")
+        except Exception as e:
+            logger.error(f"Error toggling STT: {e}")
+            # Update UI state as a fallback
+            self.handle_frontend_stt_state(not self.stt_listening)
         finally:
             self.is_toggling_stt = False
 
@@ -718,12 +725,22 @@ class ChatWindow(QMainWindow):
         """
         Update UI to reflect the STT listening state.
         """
-        self.stt_listening = is_listening
-        self.toggle_stt_button.setText(f"STT {'On' if is_listening else 'Off'}")
-        self.toggle_stt_button.setProperty("isListening", is_listening)
-        self.toggle_stt_button.style().unpolish(self.toggle_stt_button)
-        self.toggle_stt_button.style().polish(self.toggle_stt_button)
-        self.toggle_stt_button.update()
+        try:
+            self.stt_listening = is_listening
+            self.toggle_stt_button.setText(f"STT {'On' if is_listening else 'Off'}")
+            self.toggle_stt_button.setProperty("isListening", is_listening)
+            
+            # Force style update
+            style = self.toggle_stt_button.style()
+            if style:
+                style.unpolish(self.toggle_stt_button)
+                style.polish(self.toggle_stt_button)
+            
+            self.toggle_stt_button.update()
+        except asyncio.exceptions.CancelledError:
+            logger.warning("STT state update task was cancelled - this is expected during shutdown")
+        except Exception as e:
+            logger.error(f"Error updating STT state in UI: {e}")
 
     # -------------------------- TTS Handling --------------------------
 
@@ -819,10 +836,63 @@ class ChatWindow(QMainWindow):
         logger.info("Finalizing assistant bubble")
         self.finalize_assistant_bubble()
 
+    # -------------------------- Asynchronous Audio Consumer --------------------------
+
+    async def audio_consumer(self):
+        """
+        An async loop that continuously reads audio chunks from `self.audio_queue`
+        and writes them to the `QueueAudioDevice`. Eliminates the need for
+        QTimer-based polling.
+        """
+        logger.info("[audio_consumer] Starting async audio loop")
+        while True:
+            try:
+                pcm_chunk = await self.audio_queue.get()
+                if pcm_chunk is None:
+                    # End-of-stream
+                    logger.info("[audio_consumer] Received end-of-stream marker.")
+                    self.audio_device.mark_end_of_stream()
+
+                    # Wait for the device to play the remainder
+                    while True:
+                        with QMutexLocker(self.audio_device.mutex):
+                            buffer_len = len(self.audio_device.audio_buffer)
+                        if buffer_len == 0:
+                            logger.info("[audio_consumer] Audio buffer is empty, stopping sink.")
+                            self.audio_sink.stop()
+                            break
+                        await asyncio.sleep(0.05)
+
+                    # Let the server know we're done playing audio
+                    if self.ws_client and self.ws_client.ws:
+                        await self.ws_client.ws.send(json.dumps({"action": "playback-complete"}))
+                        logger.info("[audio_consumer] Sent playback-complete to server")
+
+                    # Reset end_of_stream
+                    with QMutexLocker(self.audio_device.mutex):
+                        self.audio_device.end_of_stream = False
+                        self.audio_device.last_read_empty = False
+                    continue
+
+                # If sink is not active, attempt to restart
+                if self.audio_sink.state() != QAudio.State.ActiveState:
+                    logger.debug("[audio_consumer] Restarting audio sink from non-active state.")
+                    self.audio_device.close()
+                    self.audio_device.open(QIODevice.OpenModeFlag.ReadOnly)
+                    self.audio_sink.start(self.audio_device)
+
+                # Write chunk to device
+                bytes_written = self.audio_device.writeData(pcm_chunk)
+                logger.debug(f"[audio_consumer] Wrote {bytes_written} bytes to device.")
+            
+            except Exception as e:
+                logger.error(f"[audio_consumer] Error: {e}")
+                await asyncio.sleep(0.05)
+
     # -------------------------- Audio & WS Handlers --------------------------
 
     def on_audio_received(self, pcm_data: bytes):
-        logger.info(f"Processing audio chunk of size: {len(pcm_data)} bytes")
+        logger.info(f"Received audio chunk of size: {len(pcm_data)} bytes")
         if pcm_data == b'audio:' or len(pcm_data) == 0:
             logger.info("Received empty audio message, marking end of stream")
             self.audio_queue.put_nowait(None)
@@ -833,76 +903,12 @@ class ChatWindow(QMainWindow):
                 pcm_data = pcm_data[len(prefix):]
             self.audio_queue.put_nowait(pcm_data)
 
-    def feed_audio_data(self):
-        try:
-            current_state = self.audio_sink.state()
-            
-            # Only attempt restart if device is properly initialized
-            if current_state != QAudio.State.ActiveState and self.audio_device.is_active:
-                logger.debug(f"[feed_audio_data] Restarting audio sink from state: {current_state}")
-                self.audio_device.close()
-                self.audio_device.open(QIODevice.OpenModeFlag.ReadOnly)
-                self.audio_sink.start(self.audio_device)
-                return
-
-            chunk_limit = 5
-            chunks_processed = 0
-            
-            while chunks_processed < chunk_limit and self.audio_device.is_active:
-                try:
-                    pcm_chunk = self.audio_queue.get_nowait()
-                    chunks_processed += 1
-                    
-                    if pcm_chunk is None:
-                        logger.info("[feed_audio_data] Received end-of-stream marker")
-                        self.audio_device.mark_end_of_stream()
-                        if len(self.audio_device.audio_buffer) == 0:
-                            logger.info("[feed_audio_data] Buffer empty at end-of-stream, stopping audio sink")
-                            self.audio_sink.stop()
-                        break
-
-                    if self.audio_device.is_active:  # Check state before writing
-                        bytes_written = self.audio_device.writeData(pcm_chunk)
-                        logger.debug(f"[feed_audio_data] Wrote {bytes_written} bytes to audio device")
-                except asyncio.QueueEmpty:
-                    break
-
-            # Schedule next processing if needed
-            if chunks_processed >= chunk_limit and not self.audio_queue.empty() and self.audio_device.is_active:
-                QTimer.singleShot(1, self.feed_audio_data)
-
-        except Exception as e:
-            logger.error(f"Error in feed_audio_data: {e}")
-            logger.exception("Stack trace:")
-
-    def check_audio_state(self):
-        """
-        Detect if audio playback has finished and handle it properly.
-        """
-        current_state = self.audio_sink.state()
-        with QMutexLocker(self.audio_device.mutex):
-            buffer_size = len(self.audio_device.audio_buffer)
-            is_end_of_stream = self.audio_device.end_of_stream
-
-            if current_state == QAudio.State.IdleState and buffer_size == 0 and is_end_of_stream:
-                logger.info("[check_audio_state] Detected idle condition. Buffer size: %d, End of stream: %s", buffer_size, is_end_of_stream)
-                self.handle_audio_state_changed(current_state)
-
     def handle_audio_state_changed(self, state):
         logger.info(f"[handle_audio_state_changed] Audio state changed to: {state}")
         with QMutexLocker(self.audio_device.mutex):
             buffer_size = len(self.audio_device.audio_buffer)
             is_end_of_stream = self.audio_device.end_of_stream
-
         logger.info(f"[handle_audio_state_changed] Buffer size: {buffer_size}, End of stream: {is_end_of_stream}")
-        if state == QAudio.State.IdleState and self.ws_client and self.ws_client.ws:
-            if buffer_size == 0 and is_end_of_stream:
-                logger.info("[handle_audio_state_changed] Audio playback finished. Sending playback-complete message to server...")
-                asyncio.create_task(self.ws_client.ws.send(json.dumps({"action": "playback-complete"})))
-                logger.info("[handle_audio_state_changed] Playback-complete message sent to server")
-                with QMutexLocker(self.audio_device.mutex):
-                    self.audio_device.end_of_stream = False
-                    self.audio_device.last_read_empty = False
 
     # -------------------------- Connection Status --------------------------
 
@@ -918,6 +924,41 @@ class ChatWindow(QMainWindow):
 
     def keyPressEvent(self, event):
         super().keyPressEvent(event)
+
+    def closeEvent(self, event):
+        """Handle proper cleanup when the window is closed."""
+        logger.info("Application closing, cleaning up resources...")
+        
+        # Stop STT if it's running
+        if self.stt_listening and hasattr(self.frontend_stt, 'toggle'):
+            try:
+                self.frontend_stt.toggle()
+            except Exception as e:
+                logger.error(f"Error stopping STT during shutdown: {e}")
+        
+        # Clean up audio resources
+        try:
+            if self.audio_sink.state() != QAudio.State.StoppedState:
+                self.audio_sink.stop()
+            
+            if self.audio_device.is_active:
+                self.audio_device.close()
+        except Exception as e:
+            logger.error(f"Error cleaning up audio resources: {e}")
+        
+        # Set running flag to False for WebSocket client
+        if hasattr(self, 'ws_client'):
+            self.ws_client.running = False
+
+        # Cancel the audio task if still running
+        try:
+            # If you stored the task reference, cancel it here.
+            # In this example, we deferred creation, so ensure no pending task remains.
+            pass
+        except Exception as e:
+            logger.error(f"Error cancelling audio task: {e}")
+
+        super().closeEvent(event)
 
 # -----------------------------------------------------------------------------
 #                                   7. MAIN
