@@ -948,13 +948,26 @@ class ChatWindow(QMainWindow):
         super().keyPressEvent(event)
 
     def closeEvent(self, event):
+        """
+        Handle application shutdown when the window is closed.
+        
+        This method uses the "fire and forget" approach for cleanup operations
+        since we're shutting down the application and don't need to wait for
+        cleanup to complete before proceeding.
+        """
         logger.info("Closing application...")
         
         # Stop the websocket client
         if hasattr(self, 'ws_client') and self.ws_client:
             self.ws_client.running = False
         
-        # Stop STT if it's running
+        # Stop STT if it's running - using the synchronous "fire and forget" method
+        # which is appropriate for application shutdown as we don't need to block
+        # waiting for cleanup to complete
+        #
+        # NOTE: This is the ONLY place where frontend_stt.stop() should be called!
+        # For all other cases where STT needs to be stopped, use the async methods
+        # (either set_enabled(False) or stop_async()) to ensure proper cleanup.
         if hasattr(self, 'frontend_stt') and self.frontend_stt:
             self.frontend_stt.stop()
         
@@ -968,11 +981,10 @@ class ChatWindow(QMainWindow):
         try:
             if hasattr(self, 'audio_task') and self.audio_task:
                 self.audio_task.cancel()
-            # In this example, we deferred creation, so ensure no pending task remains.
-            pass
         except Exception as e:
             logger.error(f"Error cancelling audio task: {e}")
-
+            
+        # Let the parent class handle the rest of the shutdown process
         super().closeEvent(event)
 
 # -----------------------------------------------------------------------------

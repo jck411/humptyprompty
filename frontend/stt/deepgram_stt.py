@@ -285,8 +285,22 @@ class DeepgramSTT(QObject):
         # Use set_enabled which now has proper task management
         self.set_enabled(not self.is_enabled)
         
+    # WARNING: This synchronous stop() method should ONLY be used for application shutdown!
+    # For all other cases where you need to stop STT, use stop_async() instead.
+    # This method is currently only called from ChatWindow.closeEvent() in client.py.
     def stop(self):
-        """Completely stop STT and clean up resources."""
+        """
+        Synchronous "fire and forget" method to stop STT.
+        
+        This method is designed for application shutdown scenarios where you don't need
+        to wait for cleanup to complete. It initiates the cleanup process but returns
+        immediately.
+        
+        For normal application flow where you need to ensure cleanup is complete before
+        proceeding, use stop_async() instead.
+        
+        WARNING: This method should ONLY be used during application shutdown!
+        """
         # Cancel any pending tasks
         if self._start_task and not self._start_task.done():
             self._start_task.cancel()
@@ -296,42 +310,51 @@ class DeepgramSTT(QObject):
             self._stop_task.cancel()
             self._stop_task = None
             
-        if self._keep_alive_task and not self._keep_alive_task.done():
-            self._keep_alive_task.cancel()
-            self._keep_alive_task = None
+        # Start the async cleanup but don't wait for it
+        # This is appropriate for application shutdown where we don't need to block
+        self._stop_task = asyncio.create_task(self._async_stop())
             
-        # Cancel the audio consumer task
-        if self._audio_consumer_task and not self._audio_consumer_task.done():
-            self._audio_consumer_task.cancel()
-            self._audio_consumer_task = None
-            
-        # Stop the stream if it's running
-        if self.stream:
-            try:
-                self.stream.stop()
-                self.stream.close()
-            except Exception as e:
-                logging.error(f"Error stopping audio stream: {e}")
-            self.stream = None
-            
-        # Close the Deepgram connection if it's open
-        if self.dg_connection:
-            try:
-                # Create a task to finish the connection but don't wait for it
-                # This prevents blocking during shutdown
-                asyncio.create_task(self.dg_connection.finish())
-            except Exception as e:
-                logging.error(f"Error closing Deepgram connection: {e}")
-            self.dg_connection = None
-            
-        # Update state
+        # Update state immediately
         self.is_listening = False
         self.is_enabled = False
         self.is_paused = False
         self.state_changed.emit(False)
         self.enabled_changed.emit(False)
-        logging.debug("STT fully stopped and cleaned up")
+        logging.debug("STT stop initiated (fire and forget)")
         
+    async def stop_async(self):
+        """
+        Asynchronous method to stop STT and wait for cleanup to complete.
+        
+        This method ensures all resources are properly cleaned up before returning.
+        Use this method when you need to ensure cleanup is complete before proceeding
+        with other operations in your application flow.
+        
+        For application shutdown where blocking is not desired, use stop() instead.
+        
+        Returns:
+            None
+        """
+        # Cancel any pending start task
+        if self._start_task and not self._start_task.done():
+            self._start_task.cancel()
+            self._start_task = None
+            
+        # Cancel any existing stop task
+        if self._stop_task and not self._stop_task.done():
+            self._stop_task.cancel()
+            self._stop_task = None
+            
+        # Execute the async stop and wait for it to complete
+        self._stop_task = asyncio.create_task(self._async_stop())
+        await self._stop_task
+        
+        # Update state
+        self.is_enabled = False
+        self.is_paused = False
+        self.enabled_changed.emit(False)
+        logging.debug("STT fully stopped and cleaned up (async)")
+
     def __enter__(self):
         """Context manager entry - enables STT."""
         self.set_enabled(True)
