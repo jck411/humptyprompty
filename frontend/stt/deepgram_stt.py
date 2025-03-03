@@ -42,6 +42,11 @@ class DeepgramSTT(QObject):
         self.is_paused = False                   # Pause streaming toggle
         self.is_listening = False                # Connection active toggle
 
+        # Thread-safe queue for audio data
+        self._audio_queue = asyncio.Queue()
+        # Audio consumer task reference
+        self._audio_consumer_task = None
+
         # Keep-alive task reference (for paused state)
         self._keep_alive_task = None
         # Track the start/stop tasks
@@ -98,26 +103,49 @@ class DeepgramSTT(QObject):
         self.dg_connection.on(LiveTranscriptionEvents.Transcript, on_transcript)
 
     def audio_callback(self, indata, frames, time, status):
-        """Captures microphone audio and sends it to Deepgram unless paused."""
+        """Captures microphone audio and puts it into a thread-safe queue."""
         if status:
             logging.warning("Audio callback status: %s", status)
             return
 
-        if self.is_listening and self.is_enabled and not self.is_paused and self.dg_connection:
+        if self.is_listening and self.is_enabled and not self.is_paused:
             try:
                 # Convert float32 audio (range [-1, 1]) to int16 for "linear16" encoding if necessary
                 if AUDIO_CONFIG['dtype'] == 'float32':
                     indata_int16 = (indata * 32767).astype('int16')
                 else:
                     indata_int16 = indata
+                
                 logging.debug("Captured audio block: frames=%s, first sample=%s", 
                               frames, indata_int16[0][0] if frames > 0 else 'N/A')
-                # Schedule sending the audio data on the main event loop
+                
+                # Put the audio data into the queue instead of sending directly
                 self.loop.call_soon_threadsafe(
-                    asyncio.create_task, self.dg_connection.send(indata_int16.tobytes())
+                    self._audio_queue.put_nowait, indata_int16.tobytes()
                 )
             except Exception as e:
                 logging.error("Error in audio callback: %s", str(e))
+
+    async def stt_audio_consumer(self):
+        """Consumes audio data from the queue and sends it to Deepgram."""
+        try:
+            while True:
+                # Wait for audio data from the queue
+                audio_chunk = await self._audio_queue.get()
+                
+                # If connection is up, send the audio chunk
+                if self.dg_connection is not None and self.is_listening and not self.is_paused:
+                    try:
+                        await self.dg_connection.send(audio_chunk)
+                    except Exception as e:
+                        logging.error(f"Error sending chunk to Deepgram: {e}")
+                
+                # Mark the task as done
+                self._audio_queue.task_done()
+        except asyncio.CancelledError:
+            logging.debug("Audio consumer task cancelled")
+        except Exception as e:
+            logging.error(f"Error in audio consumer: {e}")
 
     async def _async_start(self):
         """Starts STT asynchronously (opens WebSocket and audio stream)."""
@@ -126,6 +154,10 @@ class DeepgramSTT(QObject):
             started = await self.dg_connection.start(LiveOptions(**DEEPGRAM_CONFIG))
             if not started:
                 raise Exception("Failed to start Deepgram connection")
+
+            # Start the audio consumer task
+            if self._audio_consumer_task is None or self._audio_consumer_task.done():
+                self._audio_consumer_task = asyncio.create_task(self.stt_audio_consumer())
 
             self.stream = sd.InputStream(
                 samplerate=AUDIO_CONFIG['sample_rate'],
@@ -154,6 +186,15 @@ class DeepgramSTT(QObject):
                     logging.debug("Keep-alive task cancelled during stop")
                 self._keep_alive_task = None
 
+            # Cancel the audio consumer task
+            if self._audio_consumer_task and not self._audio_consumer_task.done():
+                self._audio_consumer_task.cancel()
+                try:
+                    await self._audio_consumer_task
+                except asyncio.CancelledError:
+                    logging.debug("Audio consumer task cancelled during stop")
+                self._audio_consumer_task = None
+
             if self.stream:
                 self.stream.stop()
                 self.stream.close()
@@ -175,7 +216,6 @@ class DeepgramSTT(QObject):
             logging.error(f"Error stopping STT: {e}")
         finally:
             self._stop_task = None
-
 
     async def _keep_alive_loop(self, interval: float = 5.0):
         """Sends keep-alive messages while STT is paused."""
@@ -244,6 +284,53 @@ class DeepgramSTT(QObject):
         """Toggle between enabled and disabled states."""
         # Use set_enabled which now has proper task management
         self.set_enabled(not self.is_enabled)
+        
+    def stop(self):
+        """Completely stop STT and clean up resources."""
+        # Cancel any pending tasks
+        if self._start_task and not self._start_task.done():
+            self._start_task.cancel()
+            self._start_task = None
+            
+        if self._stop_task and not self._stop_task.done():
+            self._stop_task.cancel()
+            self._stop_task = None
+            
+        if self._keep_alive_task and not self._keep_alive_task.done():
+            self._keep_alive_task.cancel()
+            self._keep_alive_task = None
+            
+        # Cancel the audio consumer task
+        if self._audio_consumer_task and not self._audio_consumer_task.done():
+            self._audio_consumer_task.cancel()
+            self._audio_consumer_task = None
+            
+        # Stop the stream if it's running
+        if self.stream:
+            try:
+                self.stream.stop()
+                self.stream.close()
+            except Exception as e:
+                logging.error(f"Error stopping audio stream: {e}")
+            self.stream = None
+            
+        # Close the Deepgram connection if it's open
+        if self.dg_connection:
+            try:
+                # Create a task to finish the connection but don't wait for it
+                # This prevents blocking during shutdown
+                asyncio.create_task(self.dg_connection.finish())
+            except Exception as e:
+                logging.error(f"Error closing Deepgram connection: {e}")
+            self.dg_connection = None
+            
+        # Update state
+        self.is_listening = False
+        self.is_enabled = False
+        self.is_paused = False
+        self.state_changed.emit(False)
+        self.enabled_changed.emit(False)
+        logging.debug("STT fully stopped and cleaned up")
         
     def __enter__(self):
         """Context manager entry - enables STT."""

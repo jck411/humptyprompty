@@ -441,10 +441,18 @@ class ChatWindow(QMainWindow):
         # Optionally start STT automatically
         QTimer.singleShot(0, self.toggle_stt)
 
-        # -----------------------------------------------------------------------------
-        #   CHANGED: Defer the creation of the async audio consumer task until the event loop is running
-        # -----------------------------------------------------------------------------
-        QTimer.singleShot(0, lambda: asyncio.create_task(self.audio_consumer()))
+        # Store tasks to prevent them from being garbage collected
+        self.async_tasks = []
+        
+        # Defer the creation of async tasks until the event loop is running
+        # Use a slightly longer delay for the audio_consumer to ensure the websocket is connected first
+        QTimer.singleShot(0, self.create_async_tasks)
+
+    def create_async_tasks(self):
+        """Create and store async tasks to prevent garbage collection and task conflicts"""
+        # Create the audio consumer task
+        self.async_tasks.append(asyncio.create_task(self.audio_consumer()))
+        logger.info("Created audio_consumer task")
 
     async def _init_states_async(self):
         try:
@@ -585,7 +593,14 @@ class ChatWindow(QMainWindow):
         self.ws_client.connection_status.connect(self.handle_connection_status)
         self.ws_client.audio_received.connect(self.on_audio_received)
         self.ws_client.tts_state_changed.connect(self.handle_tts_state_changed)
-        QTimer.singleShot(0, lambda: asyncio.create_task(self.ws_client.connect()))
+        
+        # Store the websocket connection task to prevent it from being garbage collected
+        # and to ensure it's properly managed
+        if hasattr(self, 'async_tasks'):
+            self.async_tasks.append(asyncio.create_task(self.ws_client.connect()))
+        else:
+            # This should not happen, but just in case setup_websocket is called before __init__ completes
+            QTimer.singleShot(0, lambda: asyncio.create_task(self.ws_client.connect()))
 
     def setup_audio(self):
         self.audio_sink, self.audio_device = setup_audio()
@@ -933,33 +948,26 @@ class ChatWindow(QMainWindow):
         super().keyPressEvent(event)
 
     def closeEvent(self, event):
-        """Handle proper cleanup when the window is closed."""
-        logger.info("Application closing, cleaning up resources...")
+        logger.info("Closing application...")
+        
+        # Stop the websocket client
+        if hasattr(self, 'ws_client') and self.ws_client:
+            self.ws_client.running = False
         
         # Stop STT if it's running
-        if self.stt_listening and hasattr(self.frontend_stt, 'toggle'):
-            try:
-                self.frontend_stt.toggle()
-            except Exception as e:
-                logger.error(f"Error stopping STT during shutdown: {e}")
+        if hasattr(self, 'frontend_stt') and self.frontend_stt:
+            self.frontend_stt.stop()
         
-        # Clean up audio resources
-        try:
-            if self.audio_sink.state() != QAudio.State.StoppedState:
-                self.audio_sink.stop()
-            
-            if self.audio_device.is_active:
-                self.audio_device.close()
-        except Exception as e:
-            logger.error(f"Error cleaning up audio resources: {e}")
+        # Cancel all async tasks
+        if hasattr(self, 'async_tasks'):
+            for task in self.async_tasks:
+                if not task.done():
+                    task.cancel()
         
-        # Set running flag to False for WebSocket client
-        if hasattr(self, 'ws_client'):
-            self.ws_client.running = False
-
-        # Cancel the audio task if still running
+        # Cancel audio task if it exists
         try:
-            # If you stored the task reference, cancel it here.
+            if hasattr(self, 'audio_task') and self.audio_task:
+                self.audio_task.cancel()
             # In this example, we deferred creation, so ensure no pending task remains.
             pass
         except Exception as e:
@@ -980,5 +988,16 @@ if __name__ == '__main__':
     window.apply_styling()
     window.show()
 
-    with loop:
-        loop.run_forever()
+    # Ensure the event loop is properly set up before running
+    try:
+        with loop:
+            loop.run_forever()
+    except KeyboardInterrupt:
+        # Handle clean shutdown on Ctrl+C
+        logger.info("Keyboard interrupt received, shutting down...")
+    finally:
+        # Ensure all tasks are properly cleaned up
+        logger.info("Cleaning up before exit")
+        pending = asyncio.all_tasks(loop)
+        for task in pending:
+            task.cancel()
