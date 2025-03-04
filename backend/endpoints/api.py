@@ -19,7 +19,7 @@ async def toggle_tts():
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to toggle TTS: {str(e)}")
 
-@router.post("/stop-tts")
+@router.post("/stop-audio")
 async def stop_tts():
     logger.info("Stop TTS requested")
     TTS_STOP_EVENT.set()

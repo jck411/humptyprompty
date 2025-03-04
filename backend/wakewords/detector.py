@@ -99,7 +99,7 @@ class AsyncWakeWordDetector:
             # Handle wake word detection
             if keyword_index == 0:
                 print("[WakeWord] Detected 'stop there' -> stopping TTS and generation.")
-                await self.make_api_request("http://localhost:8000/api/stop-tts")
+                await self.make_api_request("http://localhost:8000/api/stop-audio")
                 await self.make_api_request("http://localhost:8000/api/stop-generation")
             elif keyword_index == 1:
                 print("[WakeWord] Detected 'computer' -> starting STT if paused.")
@@ -189,7 +189,7 @@ def listen_for_wake_words() -> None:
                 if keyword_index == 0:
                     print("[WakeWord] Detected 'stop there' -> stopping TTS and generation.")
                     try:
-                        requests.post("http://localhost:8000/api/stop-tts")
+                        requests.post("http://localhost:8000/api/stop-audio")
                         requests.post("http://localhost:8000/api/stop-generation")
                     except Exception as e:
                         print(f"[WakeWord] Error calling stop endpoints: {e}")
