@@ -2,44 +2,24 @@ import os
 import json
 import asyncio
 import threading
-from queue import Queue
-from typing import Any, AsyncIterator, Dict, List, Optional, Sequence, Set
-
-import uvicorn
-# Remove since we no longer need PyAudio for backend playback
-# import pyaudio
-from dotenv import load_dotenv
-import openai
-import re
-from datetime import datetime
-
-from fastapi import FastAPI, HTTPException, APIRouter, WebSocket, WebSocketDisconnect, Response, UploadFile
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
-
-import pvporcupine
-import struct
-
-from backend.config.config import CONFIG, setup_chat_client
-# Remove these imports since we're removing backend audio
-# from backend.audio.singleton import PyAudioSingleton
-from backend.tools.functions import get_tools, get_available_functions
-from backend.tools.helpers import get_function_and_args
-from backend.models.openaisdk import validate_messages_for_ws, stream_openai_completion
-from backend.tts.processor import process_streams
-from backend.endpoints.api import router as api_router
-from backend.wakewords.detector import start_wake_word_thread
-from backend.endpoints.state import TTS_STOP_EVENT, GEN_STOP_EVENT
-
-from contextlib import asynccontextmanager
-
-import asyncio
-import json
 import logging
 from typing import Dict, Optional, Set
+
+import uvicorn
+from dotenv import load_dotenv
+import openai
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from backend.config.config import CONFIG
-from backend.endpoints.state import GEN_STOP_EVENT, TTS_STOP_EVENT
+from fastapi.middleware.cors import CORSMiddleware
+
+from backend.config.config import CONFIG, setup_chat_client
+from backend.tools.functions import get_tools, get_available_functions
+from backend.models.openaisdk import validate_messages_for_ws, stream_openai_completion
+from backend.endpoints.api import router as api_router
+from backend.wakewords.detector import start_wake_word_thread
+from backend.endpoints.state import GEN_STOP_EVENT
+from backend.tts.processor import process_streams
+
+from contextlib import asynccontextmanager
 
 # ------------------------------------------------------------------------------
 # Global Initialization
@@ -87,11 +67,8 @@ async def unified_chat_websocket(websocket: WebSocket):
             action = data.get("action")
 
             if action == "chat":
-                print("\nProcessing new chat message...")
-                print(f"TTS Enabled: {CONFIG['GENERAL_AUDIO']['TTS_ENABLED']}")
-                
-                # Clear events for the new chat.
-                TTS_STOP_EVENT.clear()
+                print("\nProcessing new chat message...")                
+                # Clear event for the new chat.
                 GEN_STOP_EVENT.clear()
 
                 messages = data.get("messages", [])
@@ -101,15 +78,12 @@ async def unified_chat_websocket(websocket: WebSocket):
                 audio_queue = asyncio.Queue()
 
                 process_streams_task = asyncio.create_task(process_streams(
-                    phrase_queue, audio_queue, TTS_STOP_EVENT
+                    phrase_queue, audio_queue, GEN_STOP_EVENT
                 ))
 
-                audio_forward_task = None
-                if CONFIG["GENERAL_AUDIO"].get("TTS_ENABLED", False):
-                    print("Setting up frontend audio forwarding...")
-                    audio_forward_task = asyncio.create_task(forward_audio_to_websocket(
-                        audio_queue, websocket, TTS_STOP_EVENT
-                    ))
+                audio_forward_task = asyncio.create_task(forward_audio_to_websocket(
+                    audio_queue, websocket, GEN_STOP_EVENT
+                ))
 
                 try:
                     async for content in stream_openai_completion(
@@ -121,14 +95,13 @@ async def unified_chat_websocket(websocket: WebSocket):
                     ):
                         if GEN_STOP_EVENT.is_set():
                             break
-                        print(f"Sending content chunk to TTS: {content[:50]}...")
+                        print(f"Sending content chunk: {content[:50]}...")
                         await websocket.send_json({"content": content})
                 finally:
                     print("Chat stream finished, cleaning up...")
                     await phrase_queue.put(None)
                     await process_streams_task
-                    if audio_forward_task:
-                        await audio_forward_task
+                    await audio_forward_task
                     print("Cleanup completed")
     except WebSocketDisconnect:
         pass

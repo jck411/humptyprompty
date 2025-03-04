@@ -716,28 +716,27 @@ class ChatWindow(QMainWindow):
                 async with session.post(f"{HTTP_BASE_URL}/api/toggle-tts") as resp:
                     data = await resp.json()
                     self.tts_enabled = data.get("tts_enabled", self.tts_enabled)
-                if not self.tts_enabled:
-                    async with session.post(f"{HTTP_BASE_URL}/api/stop-audio") as stop_resp:
-                        await stop_resp.json()
-                    
-                    if self.audio_sink.state() != QAudio.State.StoppedState:
-                        self.audio_sink.stop()
-                    
-                    if self.audio_device.is_active:
-                        self.audio_device.close()
-                    
-                    await asyncio.to_thread(self.audio_device.clear_and_mark_end)
-                    
-                    while not self.audio_queue.empty():
-                        try:
-                            self.audio_queue.get_nowait()
-                        except:
-                            pass
-                    
+
+                if self.audio_sink.state() != QAudio.State.StoppedState:
+                    self.audio_sink.stop()
+
+                if self.audio_device.is_active:
+                    self.audio_device.close()
+
+                await asyncio.to_thread(self.audio_device.clear_buffer)
+
+                while not self.audio_queue.empty():
+                    try:
+                        self.audio_queue.get_nowait()
+                    except asyncio.QueueEmpty:
+                        break
+
+                if self.tts_enabled:
                     self.audio_device.open(QIODevice.OpenModeFlag.ReadOnly)
                     self.audio_sink.start(self.audio_device)
 
                 self.toggle_tts_button.setText("TTS On" if self.tts_enabled else "TTS Off")
+
         except Exception as e:
             logger.error(f"Error toggling TTS: {e}")
         finally:
