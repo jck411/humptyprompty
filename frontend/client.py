@@ -399,6 +399,9 @@ class ChatWindow(QMainWindow):
         self.is_toggling_stt = False
         self.is_toggling_tts = False
 
+        # Track whether TTS audio is currently playing.
+        self.tts_audio_playing = False
+
         main_widget = QWidget()
         self.setCentralWidget(main_widget)
         self.main_layout = QVBoxLayout(main_widget)
@@ -632,7 +635,6 @@ class ChatWindow(QMainWindow):
         self.auto_scroll_chat()
 
     def auto_scroll_chat(self):
-        # Remove manual event processing to avoid reentrant event loop calls.
         scroll_area = self.findChild(QScrollArea)
         vsb = scroll_area.verticalScrollBar()
         vsb.setValue(vsb.maximum())
@@ -686,7 +688,6 @@ class ChatWindow(QMainWindow):
 
                 bytes_written = await asyncio.to_thread(self.audio_device.writeData, pcm_chunk)
                 logger.debug(f"[audio_consumer] Wrote {bytes_written} bytes to device.")
-                # Yield to allow other tasks to run.
                 await asyncio.sleep(0)
             
             except Exception as e:
@@ -695,15 +696,35 @@ class ChatWindow(QMainWindow):
 
     def on_audio_received(self, pcm_data: bytes):
         logger.info(f"Received audio chunk of size: {len(pcm_data)} bytes")
+        # When TTS audio is playing (non-empty audio data), pause STT using the Deepgram keep-alive approach.
         if pcm_data == b'audio:' or len(pcm_data) == 0:
-            logger.info("Received empty audio message, marking end of stream")
+            logger.info("Received empty audio message, marking end-of-stream")
             self.audio_queue.put_nowait(None)
             self.audio_device.mark_end_of_stream()
+            # Resume STT only after TTS audio has finished playing
+            if self.frontend_stt.is_enabled and self.tts_audio_playing:
+                asyncio.create_task(self.resume_stt_after_tts())
+            self.tts_audio_playing = False
         else:
+            # If this is the first audio chunk of TTS playback, pause STT.
+            if not self.tts_audio_playing:
+                self.tts_audio_playing = True
+                if self.frontend_stt.is_enabled:
+                    self.frontend_stt.set_paused(True)
+                    logger.info("Paused STT using keep-alive mechanism due to TTS audio starting")
             prefix = b'audio:'
             if pcm_data.startswith(prefix):
                 pcm_data = pcm_data[len(prefix):]
             self.audio_queue.put_nowait(pcm_data)
+
+    async def resume_stt_after_tts(self):
+        logger.info("Waiting for TTS audio to finish playing to resume STT...")
+        # Wait until the audio sink is stopped (i.e. TTS audio finished playing).
+        while self.audio_sink.state() != QAudio.State.StoppedState:
+            await asyncio.sleep(0.1)
+        if self.frontend_stt.is_enabled:
+            self.frontend_stt.set_paused(False)
+            logger.info("Resumed STT after TTS finished playing")
 
     def handle_tts_state_changed(self, is_enabled: bool):
         self.tts_enabled = is_enabled
