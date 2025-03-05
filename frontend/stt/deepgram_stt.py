@@ -25,7 +25,6 @@ class DeepgramSTT(QObject):
         super().__init__()
         self.is_enabled = STT_CONFIG['enabled']
         self.is_paused = False
-        self.is_listening = False
 
         # Use a thread-safe queue for audio data
         self._audio_queue = Queue()
@@ -93,7 +92,7 @@ class DeepgramSTT(QObject):
             logging.warning("Audio callback status: %s", status)
             return
 
-        if self.is_listening and self.is_enabled and not self.is_paused:
+        if self.is_enabled and not self.is_paused:
             try:
                 if AUDIO_CONFIG['dtype'] == 'float32':
                     indata_int16 = (indata * 32767).astype('int16')
@@ -115,7 +114,7 @@ class DeepgramSTT(QObject):
         try:
             while True:
                 audio_chunk = await async_get(self._audio_queue)
-                if self.dg_connection is not None and self.is_listening and not self.is_paused:
+                if self.dg_connection is not None and self.is_enabled and not self.is_paused:
                     try:
                         await self.dg_connection.send(audio_chunk)
                     except Exception as e:
@@ -143,8 +142,7 @@ class DeepgramSTT(QObject):
                 callback=self.audio_callback
             )
             self.stream.start()
-            self.is_listening = True
-            self.state_changed.emit(True)
+            self.state_changed.emit(self.is_enabled)
             logging.debug("STT started")
         except Exception as e:
             logging.error("Error starting STT: %s", str(e))
@@ -182,8 +180,7 @@ class DeepgramSTT(QObject):
                     logging.warning(f"Error during Deepgram connection finish: {e}")
                 self.dg_connection = None
 
-            self.is_listening = False
-            self.state_changed.emit(False)
+            self.state_changed.emit(self.is_enabled)
             logging.debug("STT stopped")
         except Exception as e:
             logging.error(f"Error stopping STT: {e}")
@@ -207,6 +204,8 @@ class DeepgramSTT(QObject):
         try:
             self.is_enabled = enabled
             self.enabled_changed.emit(enabled)
+            self.state_changed.emit(enabled)
+            
             if self._start_task and not self._start_task.done():
                 self._start_task.cancel()
                 self._start_task = None
@@ -254,7 +253,6 @@ class DeepgramSTT(QObject):
             self._stop_task.cancel()
             self._stop_task = None
         self._stop_task = asyncio.run_coroutine_threadsafe(self._async_stop(), self.dg_loop)
-        self.is_listening = False
         self.is_enabled = False
         self.is_paused = False
         self.state_changed.emit(False)
