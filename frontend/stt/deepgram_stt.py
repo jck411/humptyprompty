@@ -33,6 +33,8 @@ class DeepgramSTT(QObject):
         self.is_enabled = STT_CONFIG['enabled']
         self.is_paused = False
         self.is_finals = []
+        self.keepalive_active = False
+        self.use_keepalive = STT_CONFIG.get('use_keepalive', True)
 
         # Create a dedicated event loop for Deepgram tasks and run it in a separate thread.
         self.dg_loop = asyncio.new_event_loop()
@@ -43,6 +45,7 @@ class DeepgramSTT(QObject):
         self._start_task = None
         self._stop_task = None
         self._is_toggling = False
+        self._keepalive_task = None
 
         # Initialize Deepgram client
         api_key = os.getenv('DEEPGRAM_API_KEY')
@@ -50,12 +53,19 @@ class DeepgramSTT(QObject):
             raise ValueError("Missing DEEPGRAM_API_KEY in environment variables")
         
         # Initialize with new client options
-        config = DeepgramClientOptions(options={"keepalive": "true"})
+        keepalive_config = {"keepalive": "true"}
+        if DEEPGRAM_CONFIG.get('keepalive_timeout'):
+            keepalive_config["keepalive_timeout"] = str(DEEPGRAM_CONFIG.get('keepalive_timeout'))
+        
+        config = DeepgramClientOptions(options=keepalive_config)
         self.deepgram = DeepgramClient(api_key, config)
         self.dg_connection = None
         self.microphone = None
 
         logging.debug("DeepgramSTT initialized with config: %s", DEEPGRAM_CONFIG)
+        logging.debug("KeepAlive enabled: %s, timeout: %s seconds", 
+                     DEEPGRAM_CONFIG.get('keepalive', True),
+                     DEEPGRAM_CONFIG.get('keepalive_timeout', 30))
 
         if STT_CONFIG['auto_start'] and self.is_enabled:
             self.set_enabled(True)
@@ -153,6 +163,13 @@ class DeepgramSTT(QObject):
 
     async def _async_stop(self):
         try:
+            # Ensure keepalive is deactivated
+            self.keepalive_active = False
+            
+            if self._keepalive_task and not self._keepalive_task.done():
+                self._keepalive_task.cancel()
+                self._keepalive_task = None
+                
             if self.microphone:
                 self.microphone.finish()
                 self.microphone = None
@@ -196,15 +213,111 @@ class DeepgramSTT(QObject):
             self._is_toggling = False
 
     def set_paused(self, paused: bool):
+        """
+        Pause or resume the STT microphone input.
+        When paused with keepalive=true, the connection stays open but no audio is sent.
+        """
         if self.is_paused == paused:
             return
+            
         self.is_paused = paused
-        # Pausing is handled differently with the Microphone class
-        if self.microphone:
+        
+        # Only handle keepalive if STT is globally enabled
+        if not self.is_enabled:
+            return
+            
+        # Use the appropriate method based on whether we're pausing or resuming
+        if self.dg_connection:
             if paused:
-                self.microphone.pause()
+                if self.use_keepalive:
+                    self._activate_keepalive()
+                else:
+                    # If not using keepalive, we'll just stop the microphone
+                    if self.microphone:
+                        self.microphone.finish()
+                        self.microphone = None
             else:
-                self.microphone.resume()
+                if self.use_keepalive and self.keepalive_active:
+                    self._deactivate_keepalive()
+                else:
+                    # If not using keepalive or not active, restart the microphone
+                    if not self.microphone and self.dg_connection:
+                        self.microphone = Microphone(self.dg_connection.send)
+                        self.microphone.start()
+                
+    def _activate_keepalive(self):
+        """
+        Activate keepalive mode - stop the microphone but keep the connection open
+        by sending KeepAlive messages.
+        """
+        if self.keepalive_active:
+            return
+            
+        logging.debug("Activating Deepgram KeepAlive mode")
+        
+        # Stop the microphone to prevent sending audio data
+        if self.microphone:
+            self.microphone.finish()
+            self.microphone = None
+            
+        self.keepalive_active = True
+        
+        # Cancel any existing keepalive task
+        if self._keepalive_task and not self._keepalive_task.done():
+            self._keepalive_task.cancel()
+            
+        # Start a task to send KeepAlive messages periodically
+        self._keepalive_task = asyncio.run_coroutine_threadsafe(
+            self._send_keepalive_messages(), 
+            self.dg_loop
+        )
+        
+    async def _send_keepalive_messages(self):
+        """
+        Send KeepAlive messages periodically to keep the connection open.
+        """
+        try:
+            # Send KeepAlive messages every 5 seconds (half the default 10-second timeout)
+            interval = 5
+            logging.debug(f"Starting KeepAlive message loop with {interval}s interval")
+            
+            while self.keepalive_active and self.dg_connection:
+                try:
+                    # Send the KeepAlive message as JSON
+                    keepalive_msg = {"type": "KeepAlive"}
+                    await self.dg_connection.send(json.dumps(keepalive_msg))
+                    logging.debug("Sent KeepAlive message")
+                except Exception as e:
+                    logging.error(f"Error sending KeepAlive message: {e}")
+                    
+                # Wait before sending the next message
+                await asyncio.sleep(interval)
+                
+        except asyncio.CancelledError:
+            logging.debug("KeepAlive message loop cancelled")
+        except Exception as e:
+            logging.error(f"Error in KeepAlive message loop: {e}")
+            
+    def _deactivate_keepalive(self):
+        """
+        Deactivate keepalive mode - restart the microphone.
+        """
+        if not self.keepalive_active:
+            return
+            
+        logging.debug("Deactivating Deepgram KeepAlive mode")
+        
+        # Cancel the keepalive task
+        if self._keepalive_task and not self._keepalive_task.done():
+            self._keepalive_task.cancel()
+            self._keepalive_task = None
+            
+        # Restart the microphone
+        if not self.microphone and self.dg_connection:
+            self.microphone = Microphone(self.dg_connection.send)
+            self.microphone.start()
+            
+        self.keepalive_active = False
 
     def _handle_error(self, error):
         logging.error("Deepgram error: %s", error)
@@ -254,6 +367,10 @@ class DeepgramSTT(QObject):
         return False
 
     def __del__(self):
+        # Ensure keepalive is deactivated
+        self.keepalive_active = False
+        if self._keepalive_task and not self._keepalive_task.done():
+            self._keepalive_task.cancel()
         self.set_enabled(False)
 
     async def shutdown(self, signal, loop):

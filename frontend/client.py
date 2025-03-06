@@ -713,8 +713,9 @@ class ChatWindow(QMainWindow):
             if not self.tts_audio_playing:
                 self.tts_audio_playing = True
                 if self.frontend_stt.is_enabled:
+                    # Use the set_paused method which now implements KeepAlive correctly
+                    logger.info("Pausing STT using KeepAlive mechanism due to TTS audio starting")
                     self.frontend_stt.set_paused(True)
-                    logger.info("Paused STT using keep-alive mechanism due to TTS audio starting")
             prefix = b'audio:'
             if pcm_data.startswith(prefix):
                 pcm_data = pcm_data[len(prefix):]
@@ -726,8 +727,9 @@ class ChatWindow(QMainWindow):
         while self.audio_sink.state() != QAudio.State.StoppedState:
             await asyncio.sleep(0.1)
         if self.frontend_stt.is_enabled:
+            # Resume STT using the set_paused method which now implements KeepAlive correctly
+            logger.info("Resuming STT after TTS finished playing")
             self.frontend_stt.set_paused(False)
-            logger.info("Resumed STT after TTS finished playing")
 
     def handle_tts_state_changed(self, is_enabled: bool):
         self.tts_enabled = is_enabled
