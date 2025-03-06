@@ -10,7 +10,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QTimer, QSize
 from PyQt6.QtGui import QColor, QPalette, QIcon
 
-from frontend.config import HTTP_BASE_URL, logger
+from frontend.config import logger
 from frontend.network import AsyncWebSocketClient
 from frontend.stt.deepgram_stt import DeepgramSTT
 from frontend.audio import AudioManager
@@ -87,11 +87,8 @@ class ChatWindow(QMainWindow):
 
     async def _init_states_async(self):
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(f"{HTTP_BASE_URL}/api/toggle-tts") as resp:
-                    data = await resp.json()
-                    self.tts_enabled = data.get("tts_enabled", False)
-                    logger.info(f"Initial TTS state: {self.tts_enabled}")
+            self.tts_enabled = await self.ws_client.get_initial_tts_state()
+            logger.info(f"Initial TTS state: {self.tts_enabled}")
         except Exception as e:
             logger.error(f"Error getting initial TTS state: {e}")
             self.tts_enabled = False
@@ -225,6 +222,9 @@ class ChatWindow(QMainWindow):
         self.ws_client.connection_status.connect(self.handle_connection_status)
         self.ws_client.audio_received.connect(self.on_audio_received)
         self.ws_client.tts_state_changed.connect(self.handle_tts_state_changed)
+        self.ws_client.tts_toggled.connect(self.handle_tts_state_changed)
+        self.ws_client.generation_stopped.connect(self.finalize_assistant_bubble)
+        self.ws_client.audio_stopped.connect(lambda: asyncio.create_task(self.audio_manager.stop_audio()))
 
     def apply_styling(self):
         self.setStyleSheet(generate_main_stylesheet(self.colors))
@@ -298,7 +298,7 @@ class ChatWindow(QMainWindow):
         self.chat_layout.addStretch()
         self.assistant_text_in_progress = ""
         self.assistant_bubble_in_progress = None
-        self.ws_client.messages.clear()
+        self.ws_client.clear_messages()
         logger.info("Chat history cleared, starting with a blank slate.")
 
     def handle_audio_state_changed(self, state):
@@ -309,9 +309,7 @@ class ChatWindow(QMainWindow):
     def on_audio_received(self, pcm_data: bytes):
         self.audio_manager.process_audio_data(pcm_data, self.frontend_stt)
         if pcm_data == b'audio:' or len(pcm_data) == 0:
-            if self.ws_client and self.ws_client.ws:
-                asyncio.create_task(self.ws_client.ws.send(json.dumps({"action": "playback-complete"})))
-                logger.info("Sent playback-complete to server")
+            asyncio.create_task(self.ws_client.send_playback_complete())
 
     def handle_tts_state_changed(self, is_enabled: bool):
         self.tts_enabled = is_enabled
@@ -320,11 +318,7 @@ class ChatWindow(QMainWindow):
     async def toggle_tts_async(self):
         self.is_toggling_tts = True
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(f"{HTTP_BASE_URL}/api/toggle-tts") as resp:
-                    data = await resp.json()
-                    self.tts_enabled = data.get("tts_enabled", not self.tts_enabled)
-            self.toggle_tts_button.setText("TTS On" if self.tts_enabled else "TTS Off")
+            await self.ws_client.toggle_tts()
         except Exception as e:
             logger.error(f"Error toggling TTS: {e}")
         finally:
@@ -332,16 +326,7 @@ class ChatWindow(QMainWindow):
 
     async def stop_tts_and_generation_async(self):
         logger.info("Stop button pressed - stopping TTS and generation")
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(f"{HTTP_BASE_URL}/api/stop-audio") as resp1:
-                    resp1_data = await resp1.json()
-                    logger.info(f"Stop TTS response: {resp1_data}")
-                async with session.post(f"{HTTP_BASE_URL}/api/stop-generation") as resp2:
-                    resp2_data = await resp2.json()
-                    logger.info(f"Stop generation response: {resp2_data}")
-        except Exception as e:
-            logger.error(f"Error stopping TTS and generation on server: {e}")
+        await self.ws_client.stop_tts_and_generation()
         await self.audio_manager.stop_audio()
         logger.info("Finalizing assistant bubble")
         self.finalize_assistant_bubble()
