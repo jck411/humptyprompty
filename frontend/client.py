@@ -31,21 +31,8 @@ from frontend.stt.deepgram_stt import DeepgramSTT
 
 import asyncio.exceptions
 
-# -----------------------------------------------------------------------------
-#                           1. CONFIGURATION & LOGGING
-# -----------------------------------------------------------------------------
-
-SERVER_HOST = "127.0.0.1"
-SERVER_PORT = 8000
-WEBSOCKET_PATH = "/ws/chat"
-HTTP_BASE_URL = f"http://{SERVER_HOST}:{SERVER_PORT}"
-
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.WARNING)
-ch = logging.StreamHandler()
-formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
-ch.setFormatter(formatter)
-logger.addHandler(ch)
+# Import configuration
+from frontend.config import SERVER_HOST, SERVER_PORT, WEBSOCKET_PATH, HTTP_BASE_URL, logger
 
 # -----------------------------------------------------------------------------
 #                        2. IMPORT STYLING & THEMING

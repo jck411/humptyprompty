@@ -6,6 +6,7 @@ import logging
 import threading
 from queue import Queue
 from signal import SIGINT, SIGTERM
+import concurrent.futures
 
 from deepgram import (
     DeepgramClient,
@@ -168,6 +169,14 @@ class DeepgramSTT(QObject):
             
             if self._keepalive_task and not self._keepalive_task.done():
                 self._keepalive_task.cancel()
+                try:
+                    # Wait for the task to be cancelled properly
+                    await asyncio.wrap_future(asyncio.run_coroutine_threadsafe(
+                        self._keepalive_task, self.dg_loop
+                    ))
+                except (asyncio.CancelledError, concurrent.futures.CancelledError):
+                    # This is expected when cancelling tasks
+                    pass
                 self._keepalive_task = None
                 
             if self.microphone:
@@ -176,15 +185,27 @@ class DeepgramSTT(QObject):
 
             if self.dg_connection:
                 try:
+                    # Add a small delay to ensure microphone is fully stopped
+                    await asyncio.sleep(0.1)
                     await self.dg_connection.finish()
                 except asyncio.CancelledError:
                     logging.debug("Deepgram connection finish cancelled as expected.")
                 except Exception as e:
                     logging.warning(f"Error during Deepgram connection finish: {e}")
-                self.dg_connection = None
+                finally:
+                    # Ensure we clear the connection reference even if there was an error
+                    self.dg_connection = None
 
             self.state_changed.emit(self.is_enabled)
             logging.debug("STT stopped")
+        except asyncio.CancelledError:
+            logging.debug("STT stop operation was cancelled")
+            # Still clean up resources even if cancelled
+            if self.microphone:
+                self.microphone.finish()
+                self.microphone = None
+            if self.dg_connection:
+                self.dg_connection = None
         except Exception as e:
             logging.error(f"Error stopping STT: {e}")
         finally:
@@ -328,7 +349,12 @@ class DeepgramSTT(QObject):
         self.set_enabled(False)
 
     def toggle(self):
-        self.set_enabled(not self.is_enabled)
+        try:
+            self.set_enabled(not self.is_enabled)
+        except Exception as e:
+            logging.error(f"Error toggling STT: {e}")
+            # Ensure UI is updated even if there's an error
+            self.state_changed.emit(self.is_enabled)
 
     def stop(self):
         if self._start_task and not self._start_task.done():
