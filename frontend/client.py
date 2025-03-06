@@ -419,7 +419,10 @@ class ChatWindow(QMainWindow):
 
         self.apply_styling()
         
-        self.frontend_stt.transcription_received.connect(self.handle_frontend_stt_text)
+        # Connect to the transcription_received signal for interim updates (optional)
+        self.frontend_stt.transcription_received.connect(self.handle_interim_stt_text)
+        # Connect to the complete_utterance_received signal for final updates
+        self.frontend_stt.complete_utterance_received.connect(self.handle_frontend_stt_text)
         self.frontend_stt.state_changed.connect(self.handle_frontend_stt_state)
 
         QTimer.singleShot(0, lambda: asyncio.create_task(self._init_states_async()))
@@ -827,9 +830,18 @@ class ChatWindow(QMainWindow):
             logger.error(f"Error cancelling audio task: {e}")
         super().closeEvent(event)
 
-    def handle_frontend_stt_text(self, text):
+    def handle_interim_stt_text(self, text):
+        # This method handles interim transcriptions
+        # You can optionally use this for visual feedback without updating the text input
         if text.strip():
-            print(f"Frontend STT text: {text}")
+            print(f"Interim STT text: {text}")
+            # Optionally, you could show this somewhere else in the UI
+            # but not in the main text input
+
+    def handle_frontend_stt_text(self, text):
+        # This method now only handles complete utterances
+        if text.strip():
+            print(f"Complete utterance: {text}")
             self.text_input.setPlainText(text)
             self.adjust_text_input_height()
 

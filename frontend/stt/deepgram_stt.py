@@ -2,22 +2,29 @@
 import os
 import asyncio
 import json
-import sounddevice as sd
 import logging
 import threading
 from queue import Queue
+from signal import SIGINT, SIGTERM
 
-from deepgram import DeepgramClient, LiveOptions, LiveTranscriptionEvents
+from deepgram import (
+    DeepgramClient,
+    DeepgramClientOptions,
+    LiveTranscriptionEvents,
+    LiveOptions,
+    Microphone
+)
 from PyQt6.QtCore import QObject, pyqtSignal
 from dotenv import load_dotenv
 from .config import AUDIO_CONFIG, DEEPGRAM_CONFIG, STT_CONFIG
 
-logging.basicConfig(level=logging.WARNING)
+logging.basicConfig(level=logging.INFO)
 
 load_dotenv()
 
 class DeepgramSTT(QObject):
     transcription_received = pyqtSignal(str)
+    complete_utterance_received = pyqtSignal(str)
     state_changed = pyqtSignal(bool)
     enabled_changed = pyqtSignal(bool)
 
@@ -25,9 +32,7 @@ class DeepgramSTT(QObject):
         super().__init__()
         self.is_enabled = STT_CONFIG['enabled']
         self.is_paused = False
-
-        # Use a thread-safe queue for audio data
-        self._audio_queue = Queue()
+        self.is_finals = []
 
         # Create a dedicated event loop for Deepgram tasks and run it in a separate thread.
         self.dg_loop = asyncio.new_event_loop()
@@ -35,8 +40,6 @@ class DeepgramSTT(QObject):
         self.dg_thread.start()
 
         # Task references
-        self._audio_consumer_task = None
-        self._keep_alive_task = None
         self._start_task = None
         self._stop_task = None
         self._is_toggling = False
@@ -45,9 +48,12 @@ class DeepgramSTT(QObject):
         api_key = os.getenv('DEEPGRAM_API_KEY')
         if not api_key:
             raise ValueError("Missing DEEPGRAM_API_KEY in environment variables")
-        self.deepgram = DeepgramClient(api_key)
+        
+        # Initialize with new client options
+        config = DeepgramClientOptions(options={"keepalive": "true"})
+        self.deepgram = DeepgramClient(api_key, config)
         self.dg_connection = None
-        self.stream = None
+        self.microphone = None
 
         logging.debug("DeepgramSTT initialized with config: %s", DEEPGRAM_CONFIG)
 
@@ -81,67 +87,64 @@ class DeepgramSTT(QObject):
             try:
                 transcript = result.channel.alternatives[0].transcript
                 if transcript.strip():
-                    logging.debug("Transcript: %s", transcript)
+                    # Add clear labels to distinguish between interim and final transcripts
+                    if result.is_final:
+                        confidence = result.channel.alternatives[0].confidence if hasattr(result.channel.alternatives[0], 'confidence') else 'N/A'
+                        logging.info("[FINAL TRANSCRIPT] %s (Confidence: %s)", transcript, confidence)
+                    else:
+                        logging.info("[INTERIM TRANSCRIPT] %s", transcript)
+                    
                     self.transcription_received.emit(transcript)
+                    
+                    # Handle final transcripts
+                    if result.is_final and transcript:
+                        self.is_finals.append(transcript)
+                        
+                # Log speech events if available
+                if hasattr(result, 'speech_final') and result.speech_final:
+                    logging.info("[SPEECH EVENT] Speech segment ended")
+                    
             except Exception as e:
                 logging.error("Error processing transcript: %s", str(e))
         self.dg_connection.on(LiveTranscriptionEvents.Transcript, on_transcript)
-
-    def audio_callback(self, indata, frames, time, status):
-        if status:
-            logging.warning("Audio callback status: %s", status)
-            return
-
-        if self.is_enabled and not self.is_paused:
-            try:
-                if AUDIO_CONFIG['dtype'] == 'float32':
-                    indata_int16 = (indata * 32767).astype('int16')
-                else:
-                    indata_int16 = indata
-
-                logging.debug("Captured audio block: frames=%s, first sample=%s", 
-                              frames, indata_int16[0][0] if frames > 0 else 'N/A')
-                # Put audio data into the thread-safe queue.
-                self._audio_queue.put(indata_int16.tobytes())
-            except Exception as e:
-                logging.error("Error in audio callback: %s", str(e))
-
-    async def stt_audio_consumer(self):
-        # Helper to asynchronously get items from the thread-safe queue.
-        async def async_get(q):
-            return await asyncio.to_thread(q.get)
         
-        try:
-            while True:
-                audio_chunk = await async_get(self._audio_queue)
-                if self.dg_connection is not None and self.is_enabled and not self.is_paused:
-                    try:
-                        await self.dg_connection.send(audio_chunk)
-                    except Exception as e:
-                        logging.error(f"Error sending chunk to Deepgram: {e}")
-        except asyncio.CancelledError:
-            logging.debug("Audio consumer task cancelled")
-        except Exception as e:
-            logging.error(f"Error in audio consumer: {e}")
+        async def on_utterance_end(client, *args, **kwargs):
+            if self.is_finals:
+                utterance = " ".join(self.is_finals)
+                logging.info("[COMPLETE UTTERANCE] %s", utterance)
+                logging.info("[UTTERANCE INFO] Segments combined: %d", len(self.is_finals))
+                self.complete_utterance_received.emit(utterance)
+                self.is_finals = []
+            else:
+                logging.info("[UTTERANCE END] No final segments to combine")
+        self.dg_connection.on(LiveTranscriptionEvents.UtteranceEnd, on_utterance_end)
 
     async def _async_start(self):
         try:
             self.setup_connection()
-            started = await self.dg_connection.start(LiveOptions(**DEEPGRAM_CONFIG))
+            
+            # Configure transcription options with updated parameters
+            options = LiveOptions(
+                model=DEEPGRAM_CONFIG.get('model', 'nova-3'),
+                language=DEEPGRAM_CONFIG.get('language', 'en-US'),
+                smart_format=DEEPGRAM_CONFIG.get('smart_format', True),
+                encoding=DEEPGRAM_CONFIG.get('encoding', 'linear16'),
+                channels=DEEPGRAM_CONFIG.get('channels', 1),
+                sample_rate=DEEPGRAM_CONFIG.get('sample_rate', 16000),
+                interim_results=DEEPGRAM_CONFIG.get('interim_results', True),
+                utterance_end_ms="1000",
+                vad_events=DEEPGRAM_CONFIG.get('vad_events', True),
+                endpointing=DEEPGRAM_CONFIG.get('endpointing', 300),
+            )
+            
+            started = await self.dg_connection.start(options)
             if not started:
                 raise Exception("Failed to start Deepgram connection")
 
-            if self._audio_consumer_task is None or self._audio_consumer_task.done():
-                self._audio_consumer_task = asyncio.create_task(self.stt_audio_consumer())
-
-            self.stream = sd.InputStream(
-                samplerate=AUDIO_CONFIG['sample_rate'],
-                channels=AUDIO_CONFIG['channels'],
-                blocksize=AUDIO_CONFIG['block_size'],
-                dtype=AUDIO_CONFIG['dtype'],
-                callback=self.audio_callback
-            )
-            self.stream.start()
+            # Use the new Microphone class instead of sounddevice
+            self.microphone = Microphone(self.dg_connection.send)
+            self.microphone.start()
+            
             self.state_changed.emit(self.is_enabled)
             logging.debug("STT started")
         except Exception as e:
@@ -150,26 +153,9 @@ class DeepgramSTT(QObject):
 
     async def _async_stop(self):
         try:
-            if self._keep_alive_task and not self._keep_alive_task.done():
-                self._keep_alive_task.cancel()
-                try:
-                    await self._keep_alive_task
-                except asyncio.CancelledError:
-                    logging.debug("Keep-alive task cancelled during stop")
-                self._keep_alive_task = None
-
-            if self._audio_consumer_task and not self._audio_consumer_task.done():
-                self._audio_consumer_task.cancel()
-                try:
-                    await self._audio_consumer_task
-                except asyncio.CancelledError:
-                    logging.debug("Audio consumer task cancelled during stop")
-                self._audio_consumer_task = None
-
-            if self.stream:
-                self.stream.stop()
-                self.stream.close()
-                self.stream = None
+            if self.microphone:
+                self.microphone.finish()
+                self.microphone = None
 
             if self.dg_connection:
                 try:
@@ -186,16 +172,6 @@ class DeepgramSTT(QObject):
             logging.error(f"Error stopping STT: {e}")
         finally:
             self._stop_task = None
-
-    async def _keep_alive_loop(self, interval: float = 5.0):
-        logging.debug("Keep-alive loop started.")
-        try:
-            while self.is_paused and self.dg_connection:
-                await self.dg_connection.send(json.dumps({"type": "KeepAlive"}))
-                await asyncio.sleep(interval)
-        except asyncio.CancelledError:
-            logging.debug("Keep-alive loop cancelled.")
-        logging.debug("Keep-alive loop ended.")
 
     def set_enabled(self, enabled: bool):
         if self.is_enabled == enabled or self._is_toggling:
@@ -215,9 +191,6 @@ class DeepgramSTT(QObject):
             if enabled:
                 self._start_task = asyncio.run_coroutine_threadsafe(self._async_start(), self.dg_loop)
             else:
-                if self._keep_alive_task and not self._keep_alive_task.done():
-                    self._keep_alive_task.cancel()
-                    self._keep_alive_task = None
                 self._stop_task = asyncio.run_coroutine_threadsafe(self._async_stop(), self.dg_loop)
         finally:
             self._is_toggling = False
@@ -226,13 +199,12 @@ class DeepgramSTT(QObject):
         if self.is_paused == paused:
             return
         self.is_paused = paused
-        if paused:
-            if self._keep_alive_task is None:
-                self._keep_alive_task = asyncio.run_coroutine_threadsafe(self._keep_alive_loop(), self.dg_loop)
-        else:
-            if self._keep_alive_task:
-                self._keep_alive_task.cancel()
-                self._keep_alive_task = None
+        # Pausing is handled differently with the Microphone class
+        if self.microphone:
+            if paused:
+                self.microphone.pause()
+            else:
+                self.microphone.resume()
 
     def _handle_error(self, error):
         logging.error("Deepgram error: %s", error)
@@ -283,3 +255,15 @@ class DeepgramSTT(QObject):
 
     def __del__(self):
         self.set_enabled(False)
+
+    async def shutdown(self, signal, loop):
+        """Gracefully shutdown the Deepgram connection"""
+        logging.debug(f"Received exit signal {signal.name if hasattr(signal, 'name') else signal}...")
+        if self.microphone:
+            self.microphone.finish()
+        if self.dg_connection:
+            await self.dg_connection.finish()
+        tasks = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
+        [task.cancel() for task in tasks]
+        await asyncio.gather(*tasks, return_exceptions=True)
+        loop.stop()
