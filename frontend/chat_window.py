@@ -3,6 +3,7 @@ import sys
 import asyncio
 from PyQt6.QtWidgets import QMainWindow, QWidget, QVBoxLayout
 from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtGui import QIcon
 
 from frontend.config import logger
 from frontend.style import DARK_COLORS, LIGHT_COLORS, generate_main_stylesheet
@@ -21,6 +22,7 @@ class ChatWindow(QMainWindow):
         # Initialize state
         self.is_dark_mode = True
         self.colors = DARK_COLORS
+        self.is_kiosk_mode = False
         
         # Create controller
         self.controller = ChatController()
@@ -118,7 +120,34 @@ class ChatWindow(QMainWindow):
     
     def keyPressEvent(self, event):
         """Handle key press events"""
+        if event.key() == Qt.Key.Key_Escape:
+            self.toggle_kiosk_mode()
         super().keyPressEvent(event)
+    
+    def toggle_kiosk_mode(self):
+        """Toggle kiosk mode"""
+        self.is_kiosk_mode = not self.is_kiosk_mode
+        
+        if self.is_kiosk_mode:
+            # Enable fullscreen
+            self.showFullScreen()
+            # Hide window frame
+            self.setWindowFlags(self.windowFlags() | Qt.WindowType.FramelessWindowHint)
+            # Enable STT, TTS, and Auto-send
+            if not self.controller.stt_enabled:
+                self.controller.toggle_stt()
+            if not self.controller.tts_enabled:
+                asyncio.create_task(self.controller.toggle_tts_async())
+            if not self.controller.auto_send_enabled:
+                self.controller.toggle_auto_send()
+        else:
+            # Disable fullscreen
+            self.showNormal()
+            # Restore window frame
+            self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.FramelessWindowHint)
+            
+        # Show the window after changing flags
+        self.show()
     
     def closeEvent(self, event):
         """Handle window close event"""
