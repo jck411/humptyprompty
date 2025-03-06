@@ -43,7 +43,7 @@ class ChatWindow(QMainWindow):
         central_widget = QWidget(self)
         self.setCentralWidget(central_widget)
         main_layout = QVBoxLayout(central_widget)
-        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setContentsMargins(10, 10, 10, 10)
         main_layout.setSpacing(0)
         
         # Create UI components

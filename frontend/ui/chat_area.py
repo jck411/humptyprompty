@@ -27,7 +27,7 @@ class ChatArea(QWidget):
         
         # Setup layout
         self.chat_layout = QVBoxLayout(self.chat_widget)
-        self.chat_layout.setContentsMargins(0, 0, 0, 0)
+        self.chat_layout.setContentsMargins(10, 10, 10, 10)
         self.chat_layout.setSpacing(2)
         self.chat_layout.addStretch()
         

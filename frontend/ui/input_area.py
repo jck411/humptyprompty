@@ -20,7 +20,7 @@ class InputArea(QWidget):
         
         # Setup layout
         self.main_layout = QHBoxLayout(self)
-        self.main_layout.setContentsMargins(0, 0, 0, 0)
+        self.main_layout.setContentsMargins(10, 5, 10, 10)
         self.main_layout.setSpacing(5)
         
         # Create text input
@@ -35,7 +35,7 @@ class InputArea(QWidget):
         # Create button widget
         button_widget = QWidget()
         button_layout = QHBoxLayout(button_widget)
-        button_layout.setContentsMargins(0, 0, 0, 0)
+        button_layout.setContentsMargins(5, 0, 0, 0)
         button_layout.setSpacing(5)
         
         # Create send button
