@@ -60,6 +60,23 @@ class TopButtons(QWidget):
         # Add left buttons to main layout
         self.main_layout.addWidget(left_buttons, stretch=1)
         
+        # Create mic indicator button (only visible when listening)
+        self.mic_button = QPushButton()
+        self.mic_button.setFixedSize(45, 45)
+        self.mic_button.setIcon(QIcon("frontend/icons/mic.svg"))
+        self.mic_button.setIconSize(QSize(30, 30))
+        self.mic_button.setStyleSheet("""
+            QPushButton {
+                border: none;
+                border-radius: 20px;
+                background-color: transparent;
+            }
+            QPushButton:hover {
+                background-color: rgba(128, 128, 128, 0.1);
+            }
+        """)
+        self.mic_button.setVisible(False)  # Initially hidden
+        
         # Create stop button
         self.stop_button = QPushButton()
         self.stop_button.setFixedSize(45, 45)
@@ -112,6 +129,7 @@ class TopButtons(QWidget):
         """)
         
         # Add stop and theme buttons to main layout
+        self.main_layout.addWidget(self.mic_button)
         self.main_layout.addWidget(self.stop_button)
         self.main_layout.addWidget(self.clear_button)
         self.main_layout.addWidget(self.theme_button)
@@ -151,6 +169,9 @@ class TopButtons(QWidget):
         self.stt_button.setText(f"STT {'On' if is_enabled else 'Off'}")
         self.stt_button.setProperty("isEnabled", is_enabled)
         self.stt_button.setProperty("isListening", is_listening)
+        
+        # Show/hide mic icon based on listening state
+        self.mic_button.setVisible(is_listening)
         
         # Force style update
         style = self.stt_button.style()
