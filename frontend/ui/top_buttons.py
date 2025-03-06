@@ -32,6 +32,7 @@ class TopButtons(QWidget):
         self.stt_button = QPushButton("STT Off")
         self.stt_button.setFixedSize(120, 40)
         self.stt_button.setObjectName("sttButton")
+        self.stt_button.setProperty("isEnabled", False)
         self.stt_button.setProperty("isListening", False)
         self.stt_button.clicked.connect(self.on_stt_toggled)
         
@@ -102,9 +103,16 @@ class TopButtons(QWidget):
         """Handle theme button click"""
         self.theme_toggled.emit()
     
-    def update_stt_state(self, is_listening):
-        """Update the STT button state"""
-        self.stt_button.setText(f"STT {'On' if is_listening else 'Off'}")
+    def update_stt_state(self, is_enabled, is_listening=False):
+        """
+        Update the STT button state
+        
+        Args:
+            is_enabled: Whether STT is enabled (on/off)
+            is_listening: Whether STT is actively listening (red state)
+        """
+        self.stt_button.setText(f"STT {'On' if is_enabled else 'Off'}")
+        self.stt_button.setProperty("isEnabled", is_enabled)
         self.stt_button.setProperty("isListening", is_listening)
         
         # Force style update

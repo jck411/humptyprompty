@@ -17,7 +17,7 @@ class ChatController(QObject):
     message_received = pyqtSignal(str)
     assistant_message_finalized = pyqtSignal()
     connection_status_changed = pyqtSignal(bool)
-    stt_state_changed = pyqtSignal(bool)
+    stt_state_changed = pyqtSignal(bool, bool)  # is_enabled, is_listening
     tts_state_changed = pyqtSignal(bool)
     auto_send_state_changed = pyqtSignal(bool)
     interim_stt_text_received = pyqtSignal(str)
@@ -31,7 +31,8 @@ class ChatController(QObject):
         # Initialize state
         self.messages = []
         self.assistant_text_in_progress = ""
-        self.stt_listening = True
+        self.stt_enabled = True
+        self.stt_listening = False
         self.tts_enabled = False
         self.auto_send_enabled = False
         self.is_toggling_stt = False
@@ -63,6 +64,7 @@ class ChatController(QObject):
         self.frontend_stt.transcription_received.connect(self.handle_interim_stt_text)
         self.frontend_stt.complete_utterance_received.connect(self.handle_final_stt_text)
         self.frontend_stt.state_changed.connect(self.handle_frontend_stt_state)
+        self.frontend_stt.enabled_changed.connect(self.handle_frontend_stt_enabled)
         
         # Audio manager signals
         self.audio_manager.audio_state_changed.connect(self.handle_audio_state_changed)
@@ -188,15 +190,21 @@ class ChatController(QObject):
             self.send_message(text)
     
     def handle_frontend_stt_state(self, is_listening):
-        """Handle frontend STT state changes"""
+        """Handle frontend STT state changes (listening state)"""
         self.stt_listening = is_listening
-        self.stt_state_changed.emit(is_listening)
+        self.stt_state_changed.emit(self.stt_enabled, is_listening)
         
         if not is_listening:
             # Reset interim text when STT is stopped
             self.interim_stt_text_received.emit("")
         
-        logger.info(f"STT state changed to: {'listening' if is_listening else 'not listening'}")
+        logger.info(f"STT listening state changed to: {'listening' if is_listening else 'not listening'}")
+    
+    def handle_frontend_stt_enabled(self, is_enabled):
+        """Handle frontend STT enabled state changes"""
+        self.stt_enabled = is_enabled
+        self.stt_state_changed.emit(is_enabled, self.stt_listening)
+        logger.info(f"STT enabled state changed to: {'enabled' if is_enabled else 'disabled'}")
     
     def toggle_stt(self):
         """Toggle STT mode"""

@@ -26,8 +26,8 @@ load_dotenv()
 class DeepgramSTT(QObject):
     transcription_received = pyqtSignal(str)
     complete_utterance_received = pyqtSignal(str)
-    state_changed = pyqtSignal(bool)
-    enabled_changed = pyqtSignal(bool)
+    state_changed = pyqtSignal(bool)  # is_listening
+    enabled_changed = pyqtSignal(bool)  # is_enabled
 
     def __init__(self):
         super().__init__()
@@ -247,6 +247,9 @@ class DeepgramSTT(QObject):
         if not self.is_enabled:
             return
             
+        # Emit state changed to update UI
+        self.state_changed.emit(not paused)
+            
         # Use the appropriate method based on whether we're pausing or resuming
         if self.dg_connection:
             if paused:
@@ -282,6 +285,9 @@ class DeepgramSTT(QObject):
             self.microphone = None
             
         self.keepalive_active = True
+        
+        # Emit state changed to update UI - not actively listening when in keepalive mode
+        self.state_changed.emit(False)
         
         # Cancel any existing keepalive task
         if self._keepalive_task and not self._keepalive_task.done():
@@ -339,6 +345,9 @@ class DeepgramSTT(QObject):
             self.microphone.start()
             
         self.keepalive_active = False
+        
+        # Emit state changed to update UI - actively listening when not in keepalive mode
+        self.state_changed.emit(True)
 
     def _handle_error(self, error):
         logging.error("Deepgram error: %s", error)

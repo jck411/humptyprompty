@@ -84,6 +84,12 @@ def generate_main_stylesheet(colors):
         color: {colors['text_primary']};
         font-size: 14px;
     }}
+    QPushButton#sttButton[isEnabled="true"][isListening="false"] {{
+        background-color: green !important;
+        color: white !important;
+        border: none;
+        border-radius: 10px;
+    }}
     QPushButton#sttButton[isListening="true"] {{
         background-color: red !important;
         color: white !important;
