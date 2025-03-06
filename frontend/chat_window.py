@@ -140,14 +140,37 @@ class ChatWindow(QMainWindow):
                 asyncio.create_task(self.controller.toggle_tts_async())
             if not self.controller.auto_send_enabled:
                 self.controller.toggle_auto_send()
+            
+            # Hide UI elements
+            self.update_ui_visibility(False)
         else:
             # Disable fullscreen
             self.showNormal()
             # Restore window frame
             self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.FramelessWindowHint)
             
+            # Show UI elements
+            self.update_ui_visibility(True)
+            
         # Show the window after changing flags
         self.show()
+    
+    def update_ui_visibility(self, visible):
+        """Update UI element visibility based on kiosk mode"""
+        # Hide/show STT, TTS, and Auto-send buttons
+        self.top_buttons.stt_button.setVisible(visible)
+        self.top_buttons.tts_button.setVisible(visible)
+        self.top_buttons.auto_send_button.setVisible(visible)
+        
+        # Hide/show input area and send button
+        self.input_area.text_input.setVisible(visible)
+        self.input_area.send_button.setVisible(visible)
+        
+        # Keep mic, stop, clear, and theme buttons visible
+        self.top_buttons.mic_button.setVisible(True)
+        self.top_buttons.stop_button.setVisible(True)
+        self.top_buttons.clear_button.setVisible(True)
+        self.top_buttons.theme_button.setVisible(True)
     
     def closeEvent(self, event):
         """Handle window close event"""
