@@ -102,6 +102,12 @@ def generate_main_stylesheet(colors):
         border: none;
         border-radius: 10px;
     }}
+    QPushButton#ttsButton[isTtsEnabled="true"] {{
+        background-color: green !important;
+        color: white !important;
+        border: none;
+        border-radius: 10px;
+    }}
     """
 
 def get_message_bubble_stylesheet(is_user, colors):

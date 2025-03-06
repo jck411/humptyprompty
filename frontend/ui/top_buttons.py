@@ -46,6 +46,8 @@ class TopButtons(QWidget):
         # Create TTS toggle button
         self.tts_button = QPushButton("TTS Off")
         self.tts_button.setFixedSize(120, 40)
+        self.tts_button.setObjectName("ttsButton")
+        self.tts_button.setProperty("isTtsEnabled", False)
         self.tts_button.clicked.connect(self.on_tts_toggled)
         
         # Create clear chat button
@@ -125,6 +127,14 @@ class TopButtons(QWidget):
     def update_tts_state(self, is_enabled):
         """Update the TTS button state"""
         self.tts_button.setText(f"TTS {'On' if is_enabled else 'Off'}")
+        self.tts_button.setProperty("isTtsEnabled", is_enabled)
+        
+        # Force style update
+        style = self.tts_button.style()
+        if style:
+            style.unpolish(self.tts_button)
+            style.polish(self.tts_button)
+        self.tts_button.update()
     
     def update_auto_send_state(self, is_enabled):
         """Update the auto-send button state"""
