@@ -11,7 +11,6 @@ class InputArea(QWidget):
     """
     # Signals
     send_clicked = pyqtSignal()
-    stop_clicked = pyqtSignal()
     text_changed = pyqtSignal()
     
     def __init__(self, colors):
@@ -45,16 +44,8 @@ class InputArea(QWidget):
         self.send_button.setIconSize(QSize(24, 24))
         self.send_button.clicked.connect(self.on_send_clicked)
         
-        # Create stop button
-        self.stop_button = QPushButton()
-        self.stop_button.setFixedSize(50, 50)
-        self.stop_button.setIcon(QIcon("frontend/icons/stop_all.svg"))
-        self.stop_button.setIconSize(QSize(30, 30))
-        self.stop_button.clicked.connect(self.on_stop_clicked)
-        
         # Add buttons to layout
         button_layout.addWidget(self.send_button)
-        button_layout.addWidget(self.stop_button)
         
         # Add widgets to main layout
         self.main_layout.addWidget(self.text_input, stretch=1)
@@ -63,10 +54,6 @@ class InputArea(QWidget):
     def on_send_clicked(self):
         """Handle send button click"""
         self.send_clicked.emit()
-    
-    def on_stop_clicked(self):
-        """Handle stop button click"""
-        self.stop_clicked.emit()
     
     def on_text_changed(self):
         """Handle text input changes"""

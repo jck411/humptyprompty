@@ -13,6 +13,7 @@ class TopButtons(QWidget):
     clear_clicked = pyqtSignal()
     theme_toggled = pyqtSignal()
     auto_send_toggled = pyqtSignal()
+    stop_clicked = pyqtSignal()
     
     def __init__(self):
         super().__init__()
@@ -50,20 +51,48 @@ class TopButtons(QWidget):
         self.tts_button.setProperty("isTtsEnabled", False)
         self.tts_button.clicked.connect(self.on_tts_toggled)
         
-        # Create clear chat button
-        self.clear_button = QPushButton("CLEAR")
-        self.clear_button.setFixedSize(120, 40)
-        self.clear_button.clicked.connect(self.on_clear_clicked)
-        
         # Add buttons to left layout
         left_layout.addWidget(self.stt_button)
         left_layout.addWidget(self.auto_send_button)
         left_layout.addWidget(self.tts_button)
-        left_layout.addWidget(self.clear_button)
         left_layout.addStretch()
         
         # Add left buttons to main layout
         self.main_layout.addWidget(left_buttons, stretch=1)
+        
+        # Create stop button
+        self.stop_button = QPushButton()
+        self.stop_button.setFixedSize(45, 45)
+        self.stop_button.setIcon(QIcon("frontend/icons/stop_all.svg"))
+        self.stop_button.setIconSize(QSize(30, 30))
+        self.stop_button.clicked.connect(self.on_stop_clicked)
+        self.stop_button.setStyleSheet("""
+            QPushButton {
+                border: none;
+                border-radius: 20px;
+                background-color: transparent;
+            }
+            QPushButton:hover {
+                background-color: rgba(128, 128, 128, 0.1);
+            }
+        """)
+        
+        # Create clear chat button
+        self.clear_button = QPushButton()
+        self.clear_button.setFixedSize(45, 45)
+        self.clear_button.setIcon(QIcon("frontend/icons/clear_all.svg"))
+        self.clear_button.setIconSize(QSize(30, 30))
+        self.clear_button.clicked.connect(self.on_clear_clicked)
+        self.clear_button.setStyleSheet("""
+            QPushButton {
+                border: none;
+                border-radius: 20px;
+                background-color: transparent;
+            }
+            QPushButton:hover {
+                background-color: rgba(128, 128, 128, 0.1);
+            }
+        """)
         
         # Create theme toggle button
         self.theme_button = QPushButton()
@@ -82,7 +111,9 @@ class TopButtons(QWidget):
             }
         """)
         
-        # Add theme button to main layout
+        # Add stop and theme buttons to main layout
+        self.main_layout.addWidget(self.stop_button)
+        self.main_layout.addWidget(self.clear_button)
         self.main_layout.addWidget(self.theme_button)
     
     def on_stt_toggled(self):
@@ -104,6 +135,10 @@ class TopButtons(QWidget):
     def on_theme_toggled(self):
         """Handle theme button click"""
         self.theme_toggled.emit()
+        
+    def on_stop_clicked(self):
+        """Handle stop button click"""
+        self.stop_clicked.emit()
     
     def update_stt_state(self, is_enabled, is_listening=False):
         """

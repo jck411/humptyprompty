@@ -67,10 +67,10 @@ class ChatWindow(QMainWindow):
         self.top_buttons.auto_send_toggled.connect(self.controller.toggle_auto_send)
         self.top_buttons.clear_clicked.connect(self.clear_chat)
         self.top_buttons.theme_toggled.connect(self.toggle_theme)
+        self.top_buttons.stop_clicked.connect(lambda: asyncio.create_task(self.controller.stop_tts_and_generation_async()))
         
         # Connect input area signals
         self.input_area.send_clicked.connect(self.send_message)
-        self.input_area.stop_clicked.connect(lambda: asyncio.create_task(self.controller.stop_tts_and_generation_async()))
         
         # Connect controller signals
         self.controller.message_received.connect(self.chat_area.update_assistant_message)
