@@ -19,6 +19,31 @@ async def toggle_tts():
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to toggle TTS: {str(e)}")
 
+@router.get("/config")
+async def get_config():
+    """
+    Return all configuration states needed by the frontend
+    """
+    try:
+        return {
+            "tts_enabled": CONFIG["GENERAL_AUDIO"]["TTS_ENABLED"],
+            "auto_send_enabled": CONFIG["GENERAL_AUDIO"].get("AUTO_SEND_ENABLED", False)
+        }
+    except Exception as e:
+        logger.error(f"Error getting config: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get config: {str(e)}")
+
+@router.get("/auto-send-state")
+async def get_auto_send_state():
+    """
+    Return the current auto-send state
+    """
+    try:
+        return {"auto_send_enabled": CONFIG["GENERAL_AUDIO"].get("AUTO_SEND_ENABLED", False)}
+    except Exception as e:
+        logger.error(f"Error getting auto-send state: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get auto-send state: {str(e)}")
+
 @router.post("/stop-audio")
 async def stop_tts():
     logger.info("Stop TTS requested")

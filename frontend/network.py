@@ -5,6 +5,8 @@ import aiohttp
 import websockets
 from PyQt6.QtCore import QObject, pyqtSignal
 from frontend.config import SERVER_HOST, SERVER_PORT, WEBSOCKET_PATH, HTTP_BASE_URL, logger
+from frontend.stt.config import STT_CONFIG
+import concurrent.futures
 
 class AsyncWebSocketClient(QObject):
     message_received = pyqtSignal(str)
@@ -107,14 +109,61 @@ class AsyncWebSocketClient(QObject):
         """Get the initial TTS state from the server"""
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.post(f"{self.http_base_url}/api/toggle-tts") as resp:
-                    data = await resp.json()
-                    tts_enabled = data.get("tts_enabled", False)
-                    logger.info(f"Initial TTS state: {tts_enabled}")
-                    return tts_enabled
+                async with session.get(f"{self.http_base_url}/api/tts-state") as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        tts_enabled = data.get("tts_enabled", False)
+                        logger.info(f"Initial TTS state: {tts_enabled}")
+                        return tts_enabled
+                    else:
+                        logger.warning(f"Failed to get initial TTS state, status: {resp.status}")
+                        return False
         except Exception as e:
             logger.error(f"Error getting initial TTS state: {e}")
             return False
+    
+    async def get_initial_auto_send_state(self):
+        """Get the initial auto-send state from the server"""
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(f"{self.http_base_url}/api/auto-send-state") as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        auto_send_enabled = data.get("auto_send_enabled", False)
+                        logger.info(f"Initial auto-send state: {auto_send_enabled}")
+                        return auto_send_enabled
+                    else:
+                        logger.warning(f"Failed to get initial auto-send state, status: {resp.status}")
+                        return False
+        except Exception as e:
+            logger.error(f"Error getting initial auto-send state: {e}")
+            return False  # Default to disabled if we can't get the state
+    
+    async def get_all_initial_states(self):
+        """Get all initial states from the server"""
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(f"{self.http_base_url}/api/config") as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        logger.info(f"Got all initial states: {data}")
+                        return {
+                            "tts_enabled": data.get("tts_enabled", False),
+                            "auto_send_enabled": data.get("auto_send_enabled", False)
+                        }
+                    else:
+                        logger.warning(f"Failed to get all initial states, status: {resp.status}")
+                        return {
+                            "tts_enabled": False,
+                            "auto_send_enabled": False
+                        }
+        except Exception as e:
+            logger.error(f"Error getting all initial states: {e}")
+            # Return default values if there's an error
+            return {
+                "tts_enabled": False,
+                "auto_send_enabled": False
+            }
     
     async def stop_tts_and_generation(self):
         """Stop TTS and text generation on the server"""
@@ -152,3 +201,45 @@ class AsyncWebSocketClient(QObject):
         """Clear the message history"""
         self.messages.clear()
         logger.info("Message history cleared")
+        
+    async def _close_websocket(self):
+        """Close the WebSocket connection"""
+        if self.ws:
+            try:
+                await self.ws.close()
+                logger.info("WebSocket connection closed")
+            except Exception as e:
+                logger.error(f"Error closing WebSocket connection: {e}")
+            finally:
+                self.ws = None
+    
+    def cleanup(self):
+        """Clean up resources and close connections"""
+        logger.info("Cleaning up AsyncWebSocketClient")
+        self.running = False
+        
+        try:
+            # Get the current event loop
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    # If we're in a running event loop, use run_coroutine_threadsafe
+                    future = asyncio.run_coroutine_threadsafe(self._close_websocket(), loop)
+                    # Wait for a short time for the coroutine to complete
+                    try:
+                        future.result(timeout=1.0)
+                    except (asyncio.TimeoutError, concurrent.futures.TimeoutError):
+                        logger.warning("WebSocket cleanup timed out, but continuing shutdown")
+                else:
+                    # If loop exists but isn't running, use it
+                    loop.run_until_complete(self._close_websocket())
+            except RuntimeError:
+                # If no event loop exists in this thread, create a new one
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                loop.run_until_complete(self._close_websocket())
+                loop.close()
+        except Exception as e:
+            logger.error(f"Error during WebSocketClient cleanup: {e}")
+        
+        logger.info("AsyncWebSocketClient cleanup complete")

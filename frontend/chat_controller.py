@@ -7,6 +7,7 @@ from frontend.network import AsyncWebSocketClient
 from frontend.audio import AudioManager
 from frontend.stt.deepgram_stt import DeepgramSTT
 from frontend.config import logger
+from frontend.stt.config import STT_CONFIG
 
 class ChatController(QObject):
     """
@@ -31,7 +32,7 @@ class ChatController(QObject):
         # Initialize state
         self.messages = []
         self.assistant_text_in_progress = ""
-        self.stt_enabled = True
+        self.stt_enabled = STT_CONFIG.get('enabled', False)
         self.stt_listening = False
         self.tts_enabled = False
         self.auto_send_enabled = False
@@ -79,13 +80,57 @@ class ChatController(QObject):
     async def _init_states_async(self):
         """Initialize states that require async operations"""
         try:
-            self.tts_enabled = await self.ws_client.get_initial_tts_state()
-            logger.info(f"Initial TTS state: {self.tts_enabled}")
-            self.tts_state_changed.emit(self.tts_enabled)
+            # First try to get all states at once
+            all_states = await self.ws_client.get_all_initial_states()
+            if all_states:
+                # Update TTS state
+                self.tts_enabled = all_states.get("tts_enabled", False)
+                self.tts_state_changed.emit(self.tts_enabled)
+                
+                # Update auto-send state
+                self.auto_send_enabled = all_states.get("auto_send_enabled", False)
+                self.auto_send_state_changed.emit(self.auto_send_enabled)
+                
+                logger.info(f"Initialized states from server: {all_states}")
+            else:
+                # Fall back to individual state fetches if the combined endpoint fails
+                logger.info("Combined endpoint returned empty data, falling back to individual state fetches")
+                
+                # Get TTS state
+                try:
+                    self.tts_enabled = await self.ws_client.get_initial_tts_state()
+                    self.tts_state_changed.emit(self.tts_enabled)
+                except Exception as e:
+                    logger.error(f"Error getting initial TTS state: {e}")
+                    self.tts_enabled = False
+                    self.tts_state_changed.emit(self.tts_enabled)
+                
+                # Get auto-send state
+                try:
+                    self.auto_send_enabled = await self.ws_client.get_initial_auto_send_state()
+                    self.auto_send_state_changed.emit(self.auto_send_enabled)
+                except Exception as e:
+                    logger.error(f"Error getting initial auto-send state: {e}")
+                    self.auto_send_enabled = False
+                    self.auto_send_state_changed.emit(self.auto_send_enabled)
+                
+                logger.info(f"Initialized states individually: TTS={self.tts_enabled}, Auto-send={self.auto_send_enabled}")
         except Exception as e:
-            logger.error(f"Error getting initial TTS state: {e}")
+            logger.error(f"Error initializing states: {e}")
+            # Set default values if initialization fails
             self.tts_enabled = False
+            self.auto_send_enabled = False
+            self.tts_state_changed.emit(self.tts_enabled)
+            self.auto_send_state_changed.emit(self.auto_send_enabled)
+            
+        # Always use the local STT configuration
+        self.stt_enabled = STT_CONFIG.get('enabled', False)
+        self.stt_state_changed.emit(self.stt_enabled, self.stt_listening)
+        logger.info(f"Using local STT configuration: enabled={self.stt_enabled}")
+            
+        # Reset toggle flags
         self.is_toggling_tts = False
+        self.is_toggling_stt = False
     
     def send_message(self, text):
         """Send a user message to the server"""
