@@ -64,6 +64,7 @@ class ChatWindow(QMainWindow):
         # Connect top buttons signals
         self.top_buttons.stt_toggled.connect(self.controller.toggle_stt)
         self.top_buttons.tts_toggled.connect(lambda: asyncio.create_task(self.controller.toggle_tts_async()))
+        self.top_buttons.auto_send_toggled.connect(self.controller.toggle_auto_send)
         self.top_buttons.clear_clicked.connect(self.clear_chat)
         self.top_buttons.theme_toggled.connect(self.toggle_theme)
         
@@ -77,7 +78,9 @@ class ChatWindow(QMainWindow):
         self.controller.connection_status_changed.connect(self.handle_connection_status)
         self.controller.stt_state_changed.connect(self.top_buttons.update_stt_state)
         self.controller.tts_state_changed.connect(self.top_buttons.update_tts_state)
+        self.controller.auto_send_state_changed.connect(self.top_buttons.update_auto_send_state)
         self.controller.final_stt_text_received.connect(self.handle_stt_text)
+        self.controller.user_message_added.connect(lambda text: self.chat_area.add_message(text, True))
     
     def apply_styling(self):
         """Apply styling to all components"""
@@ -97,7 +100,6 @@ class ChatWindow(QMainWindow):
         text = self.input_area.get_text().strip()
         if text:
             if self.controller.send_message(text):
-                self.chat_area.add_message(text, True)
                 self.input_area.clear_text()
     
     def clear_chat(self):

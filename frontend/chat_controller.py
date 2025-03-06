@@ -19,9 +19,11 @@ class ChatController(QObject):
     connection_status_changed = pyqtSignal(bool)
     stt_state_changed = pyqtSignal(bool)
     tts_state_changed = pyqtSignal(bool)
+    auto_send_state_changed = pyqtSignal(bool)
     interim_stt_text_received = pyqtSignal(str)
     final_stt_text_received = pyqtSignal(str)
     audio_state_changed = pyqtSignal(object)  # QAudio.State
+    user_message_added = pyqtSignal(str)  # Signal for when a user message is added
     
     def __init__(self):
         super().__init__()
@@ -31,6 +33,7 @@ class ChatController(QObject):
         self.assistant_text_in_progress = ""
         self.stt_listening = True
         self.tts_enabled = False
+        self.auto_send_enabled = False
         self.is_toggling_stt = False
         self.is_toggling_tts = False
         
@@ -104,60 +107,68 @@ class ChatController(QObject):
     def finalize_assistant_message(self):
         """Finalize the current assistant message"""
         if self.assistant_text_in_progress:
-            self.ws_client.handle_assistant_message(self.assistant_text_in_progress)
+            self.add_message(self.assistant_text_in_progress, False)
             self.assistant_text_in_progress = ""
             self.assistant_message_finalized.emit()
     
     def add_message(self, text, is_user):
-        """Add a message to the message history"""
+        """Add a message to the chat history"""
+        self.messages.append({
+            "text": text,
+            "is_user": is_user
+        })
+        # Emit signal for user messages
         if is_user:
-            self.messages.append({"sender": "user", "text": text})
-        else:
-            self.messages.append({"sender": "assistant", "text": text})
+            self.user_message_added.emit(text)
     
     def clear_chat_history(self):
         """Clear the chat history"""
-        self.messages.clear()
+        self.messages = []
         self.assistant_text_in_progress = ""
-        self.ws_client.clear_messages()
-        logger.info("Chat history cleared")
     
     def handle_audio_state_changed(self, state):
         """Handle audio state changes"""
-        logger.info(f"[handle_audio_state_changed] Audio state changed to: {state}")
         self.audio_state_changed.emit(state)
     
     def on_audio_received(self, pcm_data: bytes):
-        """Handle received audio data"""
+        """Handle audio data received from the server"""
         self.audio_manager.process_audio_data(pcm_data, self.frontend_stt)
-        if pcm_data == b'audio:' or len(pcm_data) == 0:
-            asyncio.create_task(self.ws_client.send_playback_complete())
     
     def handle_tts_state_changed(self, is_enabled: bool):
         """Handle TTS state changes"""
         self.tts_enabled = is_enabled
         self.tts_state_changed.emit(is_enabled)
     
+    def toggle_auto_send(self):
+        """Toggle auto-send mode"""
+        self.auto_send_enabled = not self.auto_send_enabled
+        logger.info(f"Auto-send mode {'enabled' if self.auto_send_enabled else 'disabled'}")
+        self.auto_send_state_changed.emit(self.auto_send_enabled)
+    
     async def toggle_tts_async(self):
-        """Toggle text-to-speech"""
+        """Toggle TTS mode asynchronously"""
         if self.is_toggling_tts:
             return
             
         self.is_toggling_tts = True
         try:
-            await self.ws_client.toggle_tts()
+            new_state = await self.ws_client.toggle_tts()
+            self.tts_enabled = new_state
+            self.tts_state_changed.emit(new_state)
+            logger.info(f"TTS toggled to: {new_state}")
         except Exception as e:
             logger.error(f"Error toggling TTS: {e}")
         finally:
             self.is_toggling_tts = False
     
     async def stop_tts_and_generation_async(self):
-        """Stop TTS and text generation"""
-        logger.info("Stop button pressed - stopping TTS and generation")
-        await self.ws_client.stop_tts_and_generation()
-        await self.audio_manager.stop_audio()
-        logger.info("Finalizing assistant message")
-        self.finalize_assistant_message()
+        """Stop TTS and text generation asynchronously"""
+        try:
+            await self.ws_client.stop_tts_and_generation()
+            await self.audio_manager.stop_audio()
+            self.finalize_assistant_message()
+        except Exception as e:
+            logger.error(f"Error stopping TTS and generation: {e}")
     
     def handle_connection_status(self, connected):
         """Handle connection status changes"""
@@ -165,63 +176,55 @@ class ChatController(QObject):
     
     def handle_interim_stt_text(self, text):
         """Handle interim STT text"""
-        if text.strip():
-            self.interim_stt_text_received.emit(text)
+        self.interim_stt_text_received.emit(text)
     
     def handle_final_stt_text(self, text):
         """Handle final STT text"""
-        if text.strip():
-            self.final_stt_text_received.emit(text)
+        self.final_stt_text_received.emit(text)
+        
+        # If auto-send is enabled, automatically send the message
+        if self.auto_send_enabled and text.strip():
+            logger.info(f"Auto-sending message: {text}")
+            self.send_message(text)
     
     def handle_frontend_stt_state(self, is_listening):
-        """Handle STT state changes"""
-        try:
-            self.stt_listening = is_listening
-            self.stt_state_changed.emit(is_listening)
-        except asyncio.CancelledError:
-            logger.warning("STT state update task was cancelled - this is expected during shutdown")
-        except Exception as e:
-            logger.error(f"Error updating STT state: {e}")
+        """Handle frontend STT state changes"""
+        self.stt_listening = is_listening
+        self.stt_state_changed.emit(is_listening)
+        
+        if not is_listening:
+            # Reset interim text when STT is stopped
+            self.interim_stt_text_received.emit("")
+        
+        logger.info(f"STT state changed to: {'listening' if is_listening else 'not listening'}")
     
     def toggle_stt(self):
-        """Toggle speech-to-text"""
+        """Toggle STT mode"""
         if self.is_toggling_stt:
             return
             
         self.is_toggling_stt = True
         try:
-            if hasattr(self.frontend_stt, 'toggle'):
-                self.frontend_stt.toggle()
-                self.handle_frontend_stt_state(not self.stt_listening)
-            else:
-                logger.error("Frontend STT implementation missing toggle method")
-                self.handle_frontend_stt_state(not self.stt_listening)
-        except asyncio.CancelledError:
-            logger.warning("STT toggle task was cancelled - this is expected during shutdown")
+            # Use the toggle method from DeepgramSTT
+            self.frontend_stt.toggle()
+            logger.info(f"STT toggled, current state: {self.frontend_stt.is_enabled}")
         except Exception as e:
             logger.error(f"Error toggling STT: {e}")
-            self.handle_frontend_stt_state(not self.stt_listening)
         finally:
             self.is_toggling_stt = False
     
     def cleanup(self):
-        """Clean up resources and cancel async tasks"""
+        """Clean up resources"""
         logger.info("Cleaning up ChatController resources...")
         
-        # Stop STT
-        if hasattr(self, 'frontend_stt') and self.frontend_stt:
-            self.frontend_stt.stop()
+        # Cancel all async tasks
+        for task in self.async_tasks:
+            if not task.done():
+                task.cancel()
         
-        # Clean up audio manager
-        if hasattr(self, 'audio_manager'):
-            self.audio_manager.cleanup()
+        # Clean up components
+        self.frontend_stt.stop()
+        self.audio_manager.cleanup()
+        self.ws_client.cleanup()
         
-        # Stop WebSocket client
-        if hasattr(self, 'ws_client') and self.ws_client:
-            self.ws_client.running = False
-        
-        # Cancel async tasks
-        if hasattr(self, 'async_tasks'):
-            for task in self.async_tasks:
-                if not task.done():
-                    task.cancel() 
+        logger.info("ChatController cleanup complete") 

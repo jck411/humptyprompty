@@ -12,6 +12,7 @@ class TopButtons(QWidget):
     tts_toggled = pyqtSignal()
     clear_clicked = pyqtSignal()
     theme_toggled = pyqtSignal()
+    auto_send_toggled = pyqtSignal()
     
     def __init__(self):
         super().__init__()
@@ -34,6 +35,13 @@ class TopButtons(QWidget):
         self.stt_button.setProperty("isListening", False)
         self.stt_button.clicked.connect(self.on_stt_toggled)
         
+        # Create auto-send toggle button
+        self.auto_send_button = QPushButton("AUTO Off")
+        self.auto_send_button.setFixedSize(120, 40)
+        self.auto_send_button.setObjectName("autoSendButton")
+        self.auto_send_button.setProperty("isAutoSend", False)
+        self.auto_send_button.clicked.connect(self.on_auto_send_toggled)
+        
         # Create TTS toggle button
         self.tts_button = QPushButton("TTS Off")
         self.tts_button.setFixedSize(120, 40)
@@ -46,6 +54,7 @@ class TopButtons(QWidget):
         
         # Add buttons to left layout
         left_layout.addWidget(self.stt_button)
+        left_layout.addWidget(self.auto_send_button)
         left_layout.addWidget(self.tts_button)
         left_layout.addWidget(self.clear_button)
         left_layout.addStretch()
@@ -81,6 +90,10 @@ class TopButtons(QWidget):
         """Handle TTS button click"""
         self.tts_toggled.emit()
     
+    def on_auto_send_toggled(self):
+        """Handle auto-send button click"""
+        self.auto_send_toggled.emit()
+    
     def on_clear_clicked(self):
         """Handle clear button click"""
         self.clear_clicked.emit()
@@ -104,6 +117,18 @@ class TopButtons(QWidget):
     def update_tts_state(self, is_enabled):
         """Update the TTS button state"""
         self.tts_button.setText(f"TTS {'On' if is_enabled else 'Off'}")
+    
+    def update_auto_send_state(self, is_enabled):
+        """Update the auto-send button state"""
+        self.auto_send_button.setText(f"AUTO {'On' if is_enabled else 'Off'}")
+        self.auto_send_button.setProperty("isAutoSend", is_enabled)
+        
+        # Force style update
+        style = self.auto_send_button.style()
+        if style:
+            style.unpolish(self.auto_send_button)
+            style.polish(self.auto_send_button)
+        self.auto_send_button.update()
     
     def update_theme_icon(self, is_dark_mode):
         """Update the theme button icon based on current theme"""

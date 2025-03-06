@@ -90,6 +90,12 @@ def generate_main_stylesheet(colors):
         border: none;
         border-radius: 10px;
     }}
+    QPushButton#autoSendButton[isAutoSend="true"] {{
+        background-color: green !important;
+        color: white !important;
+        border: none;
+        border-radius: 10px;
+    }}
     """
 
 def get_message_bubble_stylesheet(is_user, colors):
