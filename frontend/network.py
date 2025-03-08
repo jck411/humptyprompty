@@ -15,7 +15,6 @@ class AsyncWebSocketClient(QObject):
     connection_status = pyqtSignal(bool)
     audio_received = pyqtSignal(bytes)
     tts_state_changed = pyqtSignal(bool)
-    tts_toggled = pyqtSignal(bool)
     generation_stopped = pyqtSignal()
     audio_stopped = pyqtSignal()
 
@@ -99,7 +98,7 @@ class AsyncWebSocketClient(QObject):
                     data = await resp.json()
                     tts_enabled = data.get("tts_enabled", False)
                     logger.info(f"TTS toggled, new state: {tts_enabled}")
-                    self.tts_toggled.emit(tts_enabled)
+                    self.tts_state_changed.emit(tts_enabled)
                     return tts_enabled
         except Exception as e:
             logger.error(f"Error toggling TTS: {e}")
@@ -109,61 +108,32 @@ class AsyncWebSocketClient(QObject):
         """Get the initial TTS state from the server"""
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.get(f"{self.http_base_url}/api/tts-state") as resp:
+                async with session.get(f"{self.http_base_url}/api/config") as resp:
                     if resp.status == 200:
                         data = await resp.json()
-                        tts_enabled = data.get("tts_enabled", False)
-                        logger.info(f"Initial TTS state: {tts_enabled}")
-                        return tts_enabled
+                        return data.get("tts_enabled", False)
                     else:
-                        logger.warning(f"Failed to get initial TTS state, status: {resp.status}")
+                        logger.error(f"Failed to get initial TTS state: {resp.status}")
                         return False
         except Exception as e:
             logger.error(f"Error getting initial TTS state: {e}")
             return False
     
-    async def get_initial_auto_send_state(self):
-        """Get the initial auto-send state from the server"""
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(f"{self.http_base_url}/api/auto-send-state") as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        auto_send_enabled = data.get("auto_send_enabled", False)
-                        logger.info(f"Initial auto-send state: {auto_send_enabled}")
-                        return auto_send_enabled
-                    else:
-                        logger.warning(f"Failed to get initial auto-send state, status: {resp.status}")
-                        return False
-        except Exception as e:
-            logger.error(f"Error getting initial auto-send state: {e}")
-            return False  # Default to disabled if we can't get the state
-    
     async def get_all_initial_states(self):
-        """Get all initial states from the server"""
+        """Get all initial states from the server in a single request"""
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.get(f"{self.http_base_url}/api/config") as resp:
                     if resp.status == 200:
                         data = await resp.json()
                         logger.info(f"Got all initial states: {data}")
-                        return {
-                            "tts_enabled": data.get("tts_enabled", False),
-                            "auto_send_enabled": data.get("auto_send_enabled", False)
-                        }
+                        return data
                     else:
-                        logger.warning(f"Failed to get all initial states, status: {resp.status}")
-                        return {
-                            "tts_enabled": False,
-                            "auto_send_enabled": False
-                        }
+                        logger.error(f"Failed to get all initial states: {resp.status}")
+                        return None
         except Exception as e:
             logger.error(f"Error getting all initial states: {e}")
-            # Return default values if there's an error
-            return {
-                "tts_enabled": False,
-                "auto_send_enabled": False
-            }
+            return None
     
     async def stop_tts_and_generation(self):
         """Stop TTS and text generation on the server"""

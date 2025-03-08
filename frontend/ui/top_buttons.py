@@ -144,7 +144,9 @@ class TopButtons(QWidget):
     
     def on_auto_send_toggled(self):
         """Handle auto-send button click"""
-        self.auto_send_toggled.emit()
+        # Only emit the signal if the button is enabled (which means STT is on)
+        if self.auto_send_button.isEnabled():
+            self.auto_send_toggled.emit()
     
     def on_clear_clicked(self):
         """Handle clear button click"""
@@ -172,6 +174,12 @@ class TopButtons(QWidget):
         
         # Show/hide mic icon based on listening state
         self.mic_button.setVisible(is_listening)
+        
+        # Disable Auto Send button when STT is off
+        self.auto_send_button.setEnabled(is_enabled)
+        if not is_enabled:
+            self.auto_send_button.setText("AUTO Off")
+            self.auto_send_button.setProperty("isAutoSend", False)
         
         # Force style update
         style = self.stt_button.style()

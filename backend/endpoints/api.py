@@ -33,17 +33,6 @@ async def get_config():
         logger.error(f"Error getting config: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to get config: {str(e)}")
 
-@router.get("/auto-send-state")
-async def get_auto_send_state():
-    """
-    Return the current auto-send state
-    """
-    try:
-        return {"auto_send_enabled": CONFIG["GENERAL_AUDIO"].get("AUTO_SEND_ENABLED", False)}
-    except Exception as e:
-        logger.error(f"Error getting auto-send state: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to get auto-send state: {str(e)}")
-
 @router.post("/stop-audio")
 async def stop_tts():
     logger.info("Stop TTS requested")

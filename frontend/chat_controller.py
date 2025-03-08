@@ -57,7 +57,6 @@ class ChatController(QObject):
         self.ws_client.connection_status.connect(self.handle_connection_status)
         self.ws_client.audio_received.connect(self.on_audio_received)
         self.ws_client.tts_state_changed.connect(self.handle_tts_state_changed)
-        self.ws_client.tts_toggled.connect(self.handle_tts_state_changed)
         self.ws_client.generation_stopped.connect(self.finalize_assistant_message)
         self.ws_client.audio_stopped.connect(lambda: asyncio.create_task(self.audio_manager.stop_audio()))
         
@@ -80,7 +79,7 @@ class ChatController(QObject):
     async def _init_states_async(self):
         """Initialize states that require async operations"""
         try:
-            # First try to get all states at once
+            # Get all states at once
             all_states = await self.ws_client.get_all_initial_states()
             if all_states:
                 # Update TTS state
@@ -93,34 +92,20 @@ class ChatController(QObject):
                 
                 logger.info(f"Initialized states from server: {all_states}")
             else:
-                # Fall back to individual state fetches if the combined endpoint fails
-                logger.info("Combined endpoint returned empty data, falling back to individual state fetches")
+                # If the endpoint fails, use default values
+                logger.warning("Failed to get states from server, using defaults")
+                self.tts_enabled = False
+                self.tts_state_changed.emit(self.tts_enabled)
                 
-                # Get TTS state
-                try:
-                    self.tts_enabled = await self.ws_client.get_initial_tts_state()
-                    self.tts_state_changed.emit(self.tts_enabled)
-                except Exception as e:
-                    logger.error(f"Error getting initial TTS state: {e}")
-                    self.tts_enabled = False
-                    self.tts_state_changed.emit(self.tts_enabled)
-                
-                # Get auto-send state
-                try:
-                    self.auto_send_enabled = await self.ws_client.get_initial_auto_send_state()
-                    self.auto_send_state_changed.emit(self.auto_send_enabled)
-                except Exception as e:
-                    logger.error(f"Error getting initial auto-send state: {e}")
-                    self.auto_send_enabled = False
-                    self.auto_send_state_changed.emit(self.auto_send_enabled)
-                
-                logger.info(f"Initialized states individually: TTS={self.tts_enabled}, Auto-send={self.auto_send_enabled}")
+                self.auto_send_enabled = False
+                self.auto_send_state_changed.emit(self.auto_send_enabled)
         except Exception as e:
             logger.error(f"Error initializing states: {e}")
-            # Set default values if initialization fails
+            # Set default values in case of error
             self.tts_enabled = False
-            self.auto_send_enabled = False
             self.tts_state_changed.emit(self.tts_enabled)
+            
+            self.auto_send_enabled = False
             self.auto_send_state_changed.emit(self.auto_send_enabled)
             
         # Always use the local STT configuration
@@ -249,6 +234,13 @@ class ChatController(QObject):
         """Handle frontend STT enabled state changes"""
         self.stt_enabled = is_enabled
         self.stt_state_changed.emit(is_enabled, self.stt_listening)
+        
+        # If STT is turned off, also turn off Auto Send
+        if not is_enabled and self.auto_send_enabled:
+            self.auto_send_enabled = False
+            self.auto_send_state_changed.emit(False)
+            logger.info("Auto-send disabled because STT was turned off")
+        
         logger.info(f"STT enabled state changed to: {'enabled' if is_enabled else 'disabled'}")
     
     def toggle_stt(self):
