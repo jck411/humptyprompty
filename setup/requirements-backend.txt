@@ -1,0 +1,26 @@
+# Backend requirements
+fastapi==0.115.8
+uvicorn==0.34.0
+python-dotenv==1.0.1
+openai==1.61.1
+aiohttp==3.11.13
+python-multipart==0.0.20
+pydantic==2.10.6
+pydantic-settings==2.7.1
+azure-cognitiveservices-speech==1.42.0
+websockets==14.2
+httpx==0.28.1
+anyio==4.8.0
+starlette==0.45.3
+typing_extensions==4.12.2
+orjson==3.10.15
+ujson==5.10.0
+jinja2==3.1.5
+requests==2.32.3
+pytz==2025.1
+timezonefinder==6.5.8
+# For wake word detection
+pvporcupine==3.0.5
+PyAudio==0.2.14
+# For TTS
+sounddevice==0.5.1 

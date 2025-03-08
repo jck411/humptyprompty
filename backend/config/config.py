@@ -66,7 +66,23 @@ CONFIG: Dict[str, Any] = {
         },
         "AZURE_TTS": {
             "TTS_SPEED": "0%",
-            "TTS_VOICE": "en-US-KaiNeural",
+            # Popular Azure TTS voices:
+            # English (US):
+            #   - en-US-JennyNeural - Female, conversational
+            #   - en-US-GuyNeural - Male, conversational
+            #   - en-US-AriaNeural - Female, professional
+            #   - en-US-DavisNeural - Male, professional
+            #   - en-US-JasonNeural - Male, narration
+            #   - en-US-SaraNeural - Female, casual
+            #   - en-US-TonyNeural - Male, enthusiastic
+            #   - en-US-NancyNeural - Female, warm
+            # English (UK):
+            #   - en-GB-SoniaNeural - Female, professional
+            #   - en-GB-RyanNeural - Male, professional
+            # English (Australia):
+            #   - en-AU-NatashaNeural - Female, professional
+            #   - en-AU-WilliamNeural - Male, professional
+            "TTS_VOICE": "en-US-AlloyTurboMultilingualNeural",
             "SPEECH_SYNTHESIS_RATE": "0%",
             "AUDIO_FORMAT": "Raw24Khz16BitMonoPcm",
             "AUDIO_FORMAT_RATES": {

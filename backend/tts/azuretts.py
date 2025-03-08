@@ -1,6 +1,7 @@
 import os
 import asyncio
 import azure.cognitiveservices.speech as speechsdk
+from ..config.config import CONFIG
 
 class AzureTTS:
     def __init__(self):
@@ -8,7 +9,10 @@ class AzureTTS:
             subscription=os.getenv("AZURE_SPEECH_KEY"),
             region=os.getenv("AZURE_SPEECH_REGION")
         )
-        self.audio_format = speechsdk.SpeechSynthesisOutputFormat.Raw24Khz16BitMonoPcm
+        self.audio_format = getattr(
+            speechsdk.SpeechSynthesisOutputFormat,
+            CONFIG["TTS_MODELS"]["AZURE_TTS"]["AUDIO_FORMAT"]
+        )
         self.speech_config.set_speech_synthesis_output_format(self.audio_format)
         
     async def stream_to_audio(self, text):
@@ -39,12 +43,24 @@ class AzureTTS:
             yield None
             
     def _create_ssml(self, text):
-        voice = "en-US-KaiNeural"
-        prosody = {
-            "rate": "1.0",
-            "pitch": "0%",
-            "volume": "default"
-        }
+        # Popular Azure TTS voices:
+        # English (US):
+        #   - en-US-JennyNeural - Female, conversational
+        #   - en-US-GuyNeural - Male, conversational
+        #   - en-US-AriaNeural - Female, professional
+        #   - en-US-DavisNeural - Male, professional
+        #   - en-US-JasonNeural - Male, narration
+        #   - en-US-SaraNeural - Female, casual
+        #   - en-US-TonyNeural - Male, enthusiastic
+        #   - en-US-NancyNeural - Female, warm
+        # English (UK):
+        #   - en-GB-SoniaNeural - Female, professional
+        #   - en-GB-RyanNeural - Male, professional
+        # English (Australia):
+        #   - en-AU-NatashaNeural - Female, professional
+        #   - en-AU-WilliamNeural - Male, professional
+        voice = CONFIG["TTS_MODELS"]["AZURE_TTS"]["TTS_VOICE"]
+        prosody = CONFIG["TTS_MODELS"]["AZURE_TTS"]["PROSODY"]
         return f"""
 <speak version='1.0' xml:lang='en-US'>
     <voice name='{voice}'>
@@ -79,15 +95,27 @@ async def azure_text_to_speech_processor(phrase_queue: asyncio.Queue,
             subscription=os.getenv("AZURE_SPEECH_KEY"),
             region=os.getenv("AZURE_SPEECH_REGION")
         )
-        prosody = {
-            "rate": "1.0",
-            "pitch": "0%",
-            "volume": "default"
-        }
-        voice = "en-US-KaiNeural"
+        prosody = CONFIG["TTS_MODELS"]["AZURE_TTS"]["PROSODY"]
+        # Popular Azure TTS voices:
+        # English (US):
+        #   - en-US-JennyNeural - Female, conversational
+        #   - en-US-GuyNeural - Male, conversational
+        #   - en-US-AriaNeural - Female, professional
+        #   - en-US-DavisNeural - Male, professional
+        #   - en-US-JasonNeural - Male, narration
+        #   - en-US-SaraNeural - Female, casual
+        #   - en-US-TonyNeural - Male, enthusiastic
+        #   - en-US-NancyNeural - Female, warm
+        # English (UK):
+        #   - en-GB-SoniaNeural - Female, professional
+        #   - en-GB-RyanNeural - Male, professional
+        # English (Australia):
+        #   - en-AU-NatashaNeural - Female, professional
+        #   - en-AU-WilliamNeural - Male, professional
+        voice = CONFIG["TTS_MODELS"]["AZURE_TTS"]["TTS_VOICE"]
         audio_format = getattr(
             speechsdk.SpeechSynthesisOutputFormat,
-            "Raw24Khz16BitMonoPcm"
+            CONFIG["TTS_MODELS"]["AZURE_TTS"]["AUDIO_FORMAT"]
         )
         speech_config.set_speech_synthesis_output_format(audio_format)
 
