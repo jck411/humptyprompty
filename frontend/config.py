@@ -5,7 +5,7 @@ import logging
 #                           SERVER CONFIGURATION
 # -----------------------------------------------------------------------------
 
-SERVER_HOST = "127.0.0.1"
+SERVER_HOST = "192.168.1.226"
 SERVER_PORT = 8000
 WEBSOCKET_PATH = "/ws/chat"
 HTTP_BASE_URL = f"http://{SERVER_HOST}:{SERVER_PORT}"
