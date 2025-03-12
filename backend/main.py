@@ -15,7 +15,6 @@ from backend.config.config import CONFIG, setup_chat_client
 from backend.tools.functions import get_tools, get_available_functions
 from backend.models.openaisdk import validate_messages_for_ws, stream_openai_completion
 from backend.endpoints.api import router as api_router
-from backend.wakewords.detector import start_wake_word_thread
 from backend.endpoints.state import GEN_STOP_EVENT
 from backend.tts.processor import process_streams
 
@@ -40,7 +39,6 @@ logger = logging.getLogger(__name__)
 # ------------------------------------------------------------------------------
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    start_wake_word_thread()
     yield
     shutdown()
 

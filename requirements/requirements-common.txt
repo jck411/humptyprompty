@@ -1,6 +1,5 @@
 # Common requirements shared between frontend and backend
 python-dotenv==1.0.1
-PyAudio==0.2.14
 sounddevice==0.5.1
 websockets==14.2
 httpx==0.28.1

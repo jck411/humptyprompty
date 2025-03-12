@@ -19,8 +19,6 @@ jinja2==3.1.5
 requests==2.32.3
 pytz==2025.1
 timezonefinder==6.5.8
-# For wake word detection
-pvporcupine==3.0.5
-PyAudio==0.2.14
+
 # For TTS
 sounddevice==0.5.1 
