@@ -8,6 +8,8 @@ from frontend.audio import AudioManager
 from frontend.stt.deepgram_stt import DeepgramSTT
 from frontend.config import logger
 from frontend.stt.config import STT_CONFIG
+from frontend.wakeword.integration import WakeWordManager
+from frontend.wakeword.config import WAKEWORD_CONFIG
 
 class ChatController(QObject):
     """
@@ -25,6 +27,8 @@ class ChatController(QObject):
     final_stt_text_received = pyqtSignal(str)
     audio_state_changed = pyqtSignal(object)  # QAudio.State
     user_message_added = pyqtSignal(str)  # Signal for when a user message is added
+    wake_word_state_changed = pyqtSignal(bool)  # is_wake_word_detection_running
+    wake_word_detected = pyqtSignal(str)  # wake_word_name
     
     def __init__(self):
         super().__init__()
@@ -38,11 +42,13 @@ class ChatController(QObject):
         self.auto_send_enabled = False
         self.is_toggling_stt = False
         self.is_toggling_tts = False
+        self.wake_word_enabled = WAKEWORD_CONFIG.get('enabled', False)
         
         # Initialize components
         self.audio_manager = AudioManager()
         self.frontend_stt = DeepgramSTT()
         self.ws_client = AsyncWebSocketClient()
+        self.wake_word_manager = WakeWordManager(self)
         
         # Connect signals
         self._connect_signals()
@@ -68,6 +74,10 @@ class ChatController(QObject):
         
         # Audio manager signals
         self.audio_manager.audio_state_changed.connect(self.handle_audio_state_changed)
+        
+        # Wake word signals
+        self.wake_word_manager.wake_word_detected.connect(self.handle_wake_word_detected)
+        self.wake_word_manager.wake_word_state_changed.connect(self.handle_wake_word_state_changed)
     
     def initialize(self):
         """Initialize the controller and start async tasks"""
@@ -258,18 +268,45 @@ class ChatController(QObject):
         finally:
             self.is_toggling_stt = False
     
-    def cleanup(self):
-        """Clean up resources"""
-        logger.info("Cleaning up ChatController resources...")
+    def handle_wake_word_detected(self, wake_word):
+        """Handle wake word detection event"""
+        logger.info(f"Wake word detected by controller: {wake_word}")
+        self.wake_word_detected.emit(wake_word)
         
-        # Cancel all async tasks
+    def handle_wake_word_state_changed(self, is_running):
+        """Handle wake word state change event"""
+        logger.info(f"Wake word detection state changed: {'running' if is_running else 'stopped'}")
+        self.wake_word_state_changed.emit(is_running)
+        
+    def toggle_wake_word_detection(self):
+        """Toggle wake word detection on/off"""
+        is_running = self.wake_word_manager.toggle()
+        logger.info(f"Wake word detection toggled, current state: {'running' if is_running else 'stopped'}")
+        return is_running
+    
+    def cleanup(self):
+        """Clean up resources when shutting down"""
+        logger.info("Cleaning up chat controller resources")
+        
+        # Stop wake word detection
+        if hasattr(self, 'wake_word_manager'):
+            self.wake_word_manager.cleanup()
+            
+        # Cancel any running async tasks
         for task in self.async_tasks:
             if not task.done():
                 task.cancel()
         
-        # Clean up components
-        self.frontend_stt.stop()
-        self.audio_manager.cleanup()
-        self.ws_client.cleanup()
+        # Clean up audio
+        if hasattr(self, 'audio_manager'):
+            self.audio_manager.cleanup()
+            
+        # Clean up STT
+        if hasattr(self, 'frontend_stt'):
+            self.frontend_stt.stop()
+            
+        # Clean up websocket
+        if hasattr(self, 'ws_client'):
+            asyncio.create_task(self.ws_client.close())
         
-        logger.info("ChatController cleanup complete") 
+        logger.info("Chat controller resources cleaned up") 
