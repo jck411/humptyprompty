@@ -41,7 +41,7 @@ CONFIG: Dict[str, Any] = {
     "GENERAL_AUDIO": {
         "TTS_ENABLED": False,
         "AUTO_SEND_ENABLED": False,
-        "WAKEWORD_ENABLED": False,  # Enable/disable wake word detection
+        "WAKEWORD_ENABLED": True,  # Enable/disable wake word detection
     },
     "PROCESSING_PIPELINE": {
         "USE_SEGMENTATION": True,

@@ -4,18 +4,23 @@ import threading
 import asyncio
 import requests
 from concurrent.futures import ThreadPoolExecutor
-import pvporcupine
 import pyaudio
-from dotenv import load_dotenv
 from backend.config.config import CONFIG
 
+# Import our hooked Porcupine implementation
+from backend.wakewords.hook_porcupine import create as create_hooked_porcupine
+
 def get_keyword_file_paths() -> tuple[str, str]:
-    """
-    Returns the file paths of the wake word models.
-    """
+    """Get the paths to the wake word model files"""
     base_dir = os.path.dirname(os.path.abspath(__file__))
     stop_keyword_path = os.path.join(base_dir, "stop-there_en_linux_v3_0_0.ppn")
     computer_keyword_path = os.path.join(base_dir, "computer_en_linux_v3_0_0.ppn")
+    
+    # Print the paths for debugging
+    print(f"[WakeWord] Using keyword files at:")
+    print(f"[WakeWord] - Stop keyword: {stop_keyword_path}")
+    print(f"[WakeWord] - Computer keyword: {computer_keyword_path}")
+    
     return stop_keyword_path, computer_keyword_path
 
 class AsyncWakeWordDetector:
@@ -30,40 +35,78 @@ class AsyncWakeWordDetector:
         self.audio_stream = None
         self.pa = None
         self.porcupine = None
+        self.debug_counter = 0  # Counter for occasional debug output
+        self.log_interval = 100  # Log every 100 frames
 
     async def initialize(self):
         """Initialize the wake word detector without blocking the main thread"""
         try:
-            # Load environment variables for API key
-            load_dotenv()
-            
-            # Create porcupine instance in the executor to avoid blocking
-            pv_access_key = os.environ.get('PICOVOICE_API_KEY')
-            
             stop_keyword_path, computer_keyword_path = get_keyword_file_paths()
             
-            def create_porcupine():
-                return pvporcupine.create(
-                    access_key=pv_access_key,
+            def create_porcupine_instance():
+                # Get paths to Porcupine library and model
+                root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+                
+                # Check for different architectures
+                if os.path.exists(os.path.join(root_dir, "porcupine/lib/linux/x86_64/libpv_porcupine.so")):
+                    library_path = os.path.join(root_dir, "porcupine/lib/linux/x86_64/libpv_porcupine.so")
+                elif os.path.exists(os.path.join(root_dir, "porcupine/lib/raspberry-pi/arm11/libpv_porcupine.so")):
+                    library_path = os.path.join(root_dir, "porcupine/lib/raspberry-pi/arm11/libpv_porcupine.so")
+                else:
+                    # Search for any libpv_porcupine.so in the lib directory
+                    for root, _, files in os.walk(os.path.join(root_dir, "porcupine/lib")):
+                        for file in files:
+                            if file == "libpv_porcupine.so":
+                                library_path = os.path.join(root, file)
+                                break
+                
+                model_path = os.path.join(root_dir, "porcupine/lib/common/porcupine_params.pv")
+                
+                # Print paths for debugging
+                print(f"[WakeWord] Using library at: {library_path}")
+                print(f"[WakeWord] Using model at: {model_path}")
+                
+                # Create our hooked Porcupine instance with higher sensitivity values (0.7 instead of 0.5)
+                return create_hooked_porcupine(
+                    library_path=library_path,
+                    model_path=model_path,
                     keyword_paths=[stop_keyword_path, computer_keyword_path],
+                    sensitivities=[0.7, 0.7]  # Increase sensitivity for better detection
                 )
             
             # Create Porcupine in a non-blocking way
-            self.porcupine = await self.loop.run_in_executor(self.executor, create_porcupine)
+            self.porcupine = await self.loop.run_in_executor(self.executor, create_porcupine_instance)
+            print(f"[WakeWord] Detector initialized with sample rate: {self.porcupine.sample_rate} Hz, " 
+                  f"frame length: {self.porcupine.frame_length} samples")
             
             # Initialize PyAudio
             def setup_audio():
                 pa = pyaudio.PyAudio()
+                
+                # Print available audio input devices
+                print("[WakeWord] Available audio input devices:")
+                for i in range(pa.get_device_count()):
+                    device_info = pa.get_device_info_by_index(i)
+                    if device_info['maxInputChannels'] > 0:
+                        print(f"  Device {i}: {device_info['name']}")
+                
+                # Try to select a good input device (you can adjust this as needed)
+                input_device_index = None  # Use default
+                
                 audio_stream = pa.open(
                     rate=self.porcupine.sample_rate,
                     channels=1,
                     format=pyaudio.paInt16,
                     input=True,
-                    frames_per_buffer=self.porcupine.frame_length
+                    frames_per_buffer=self.porcupine.frame_length,
+                    input_device_index=input_device_index
                 )
+                print(f"[WakeWord] Audio stream opened with rate: {self.porcupine.sample_rate}, "
+                      f"format: paInt16, frames per buffer: {self.porcupine.frame_length}")
                 return pa, audio_stream
                 
             self.pa, self.audio_stream = await self.loop.run_in_executor(self.executor, setup_audio)
+            self.running = True
             return True
         except Exception as e:
             print(f"[WakeWord] Error initializing wake word detector: {e}")
@@ -91,8 +134,23 @@ class AsyncWakeWordDetector:
             def process_audio(pcm):
                 # Convert bytes to PCM
                 pcm = struct.unpack_from("h" * self.porcupine.frame_length, pcm)
+                
+                # Print audio level occasionally for debugging
+                self.debug_counter += 1
+                if self.debug_counter % self.log_interval == 0:
+                    # Calculate RMS audio level
+                    if pcm:
+                        rms = sum([x**2 for x in pcm]) / len(pcm)
+                        rms = rms**0.5
+                        print(f"[WakeWord] Audio level: {rms:.2f}")
+                    
                 # Process with porcupine
-                return self.porcupine.process(pcm)
+                result = self.porcupine.process(pcm)
+                
+                if result != -1:  # -1 means no detection
+                    print(f"[WakeWord] Detection result: {result} (0=stop-there, 1=computer)")
+                    
+                return result
                 
             keyword_index = await self.loop.run_in_executor(self.executor, process_audio, pcm_data)
             
@@ -160,15 +218,36 @@ detector = None
 def listen_for_wake_words() -> None:
     """Original blocking function kept for compatibility"""
     try:
-        load_dotenv()
-        pv_access_key = os.environ.get('PICOVOICE_API_KEY')
-        
         stop_keyword_path, computer_keyword_path = get_keyword_file_paths()
-        print(f"[WakeWord] Loading keywords from {stop_keyword_path} and {computer_keyword_path}")
         
-        porcupine = pvporcupine.create(
-            access_key=pv_access_key,
+        # Get paths to Porcupine library and model
+        root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        
+        # Check for different architectures
+        if os.path.exists(os.path.join(root_dir, "porcupine/lib/linux/x86_64/libpv_porcupine.so")):
+            library_path = os.path.join(root_dir, "porcupine/lib/linux/x86_64/libpv_porcupine.so")
+        elif os.path.exists(os.path.join(root_dir, "porcupine/lib/raspberry-pi/arm11/libpv_porcupine.so")):
+            library_path = os.path.join(root_dir, "porcupine/lib/raspberry-pi/arm11/libpv_porcupine.so")
+        else:
+            # Search for any libpv_porcupine.so in the lib directory
+            for root, _, files in os.walk(os.path.join(root_dir, "porcupine/lib")):
+                for file in files:
+                    if file == "libpv_porcupine.so":
+                        library_path = os.path.join(root, file)
+                        break
+        
+        model_path = os.path.join(root_dir, "porcupine/lib/common/porcupine_params.pv")
+        
+        # Print paths for debugging
+        print(f"[WakeWord] Using library at: {library_path}")
+        print(f"[WakeWord] Using model at: {model_path}")
+        
+        # Create hooked Porcupine instance
+        porcupine = create_hooked_porcupine(
+            library_path=library_path,
+            model_path=model_path,
             keyword_paths=[stop_keyword_path, computer_keyword_path],
+            sensitivities=[0.5, 0.5]
         )
 
         pa = pyaudio.PyAudio()
@@ -186,14 +265,14 @@ def listen_for_wake_words() -> None:
                 pcm = struct.unpack_from("h" * porcupine.frame_length, pcm)
                 keyword_index = porcupine.process(pcm)
                 # If a wake word is detected, take action.
-                if keyword_index == 0:
+                if (keyword_index == 0):
                     print("[WakeWord] Detected 'stop there' -> stopping TTS and generation.")
                     try:
                         requests.post("http://localhost:8000/api/stop-audio")
                         requests.post("http://localhost:8000/api/stop-generation")
                     except Exception as e:
                         print(f"[WakeWord] Error calling stop endpoints: {e}")
-                elif keyword_index == 1:
+                elif (keyword_index == 1):
                     print("[WakeWord] Detected 'computer' -> starting STT if paused.")
                     try:
                         requests.post("http://localhost:8000/api/start-stt")
