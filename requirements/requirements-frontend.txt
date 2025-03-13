@@ -6,4 +6,6 @@ websockets==14.2
 httpx==0.28.1
 sounddevice==0.5.1
 # For speech-to-text functionality
-deepgram-sdk==3.10.0 
+deepgram-sdk==3.10.0
+# For wake word detection
+pvporcupine==2.2.1

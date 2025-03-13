@@ -3,4 +3,5 @@ python-dotenv==1.0.1
 sounddevice==0.5.1
 websockets==14.2
 httpx==0.28.1
-typing_extensions==4.12.2 
+typing_extensions==4.12.2
+numpy==1.26.4  # Required for audio processing

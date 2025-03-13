@@ -13,7 +13,7 @@ httpx==0.28.1
 anyio==4.8.0
 starlette==0.45.3
 typing_extensions==4.12.2
-orjson==3.10.15
+orjson==3.9.12
 ujson==5.10.0
 jinja2==3.1.5
 requests==2.32.3
@@ -21,4 +21,8 @@ pytz==2025.1
 timezonefinder==6.5.8
 
 # For TTS
-sounddevice==0.5.1 
+sounddevice==0.5.1
+
+# For logging and environment
+python-json-logger==2.0.7
+environs==10.3.0
