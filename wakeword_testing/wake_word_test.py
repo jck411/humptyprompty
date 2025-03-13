@@ -9,7 +9,7 @@ from pathlib import Path
 
 # Add the backend directory to the Python path so we can import the custom Porcupine implementation
 sys.path.append(str(Path(__file__).parent.parent))
-from temp.custom_porcupine import create as create_porcupine
+from wakeword_testing.custom_porcupine import create as create_porcupine
 
 def get_keyword_file_paths():
     """Get the paths to the wake word model files"""

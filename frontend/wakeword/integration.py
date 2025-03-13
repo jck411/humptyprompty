@@ -3,6 +3,7 @@
 Integration module to connect wake word detection with STT functionality
 """
 import os
+import asyncio
 import logging
 from pathlib import Path
 from PyQt6.QtCore import QObject, pyqtSignal, pyqtSlot
@@ -52,7 +53,7 @@ class WakeWordManager(QObject):
         """Toggle wake word detection on/off"""
         self.detector.toggle()
         self.wake_word_state_changed.emit(self.detector.is_running)
-        
+    
     @pyqtSlot(str)
     def _on_wake_word_detected(self, wake_word):
         """Handle wake word detection event"""
@@ -76,13 +77,22 @@ class WakeWordManager(QObject):
                         self.chat_controller.auto_send_state_changed.emit(True)
                 else:
                     logger.info("STT is already active, ignoring wake word")
+            elif wake_word.lower() == "stop-there":
+                # Stop TTS and text generation
+                logger.info("Stopping TTS and generation based on wake word")
+                asyncio.create_task(self.chat_controller.stop_tts_and_generation_async())
+                
+                # Disable STT if it's enabled
+                if self.chat_controller.frontend_stt.is_enabled:
+                    logger.info("Disabling STT based on wake word")
+                    self.chat_controller.toggle_stt()
         else:
             logger.warning("Chat controller not set, can't activate STT on wake word")
-            
+    
     def cleanup(self):
         """Clean up resources"""
         self.stop()
         
     def __del__(self):
         """Clean up on deletion"""
-        self.cleanup() 
+        self.cleanup()

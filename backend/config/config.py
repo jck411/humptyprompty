@@ -27,7 +27,7 @@ def setup_chat_client():
 
 CONFIG: Dict[str, Any] = {
     "API_SETTINGS": {
-        "API_HOST": "openrouter"
+        "API_HOST": "openai"
     },
     "API_SERVICES": {
         "openai": {
@@ -40,7 +40,7 @@ CONFIG: Dict[str, Any] = {
         },
     },
     "GENERAL_AUDIO": {
-        "TTS_ENABLED": False,
+        "TTS_ENABLED": True,
         "AUTO_SEND_ENABLED": False,
     },
     "PROCESSING_PIPELINE": {

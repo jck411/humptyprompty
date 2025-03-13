@@ -29,7 +29,7 @@ class WakeWordDetector(QObject):
         super().__init__()
         self.is_enabled = WAKEWORD_CONFIG.get('enabled', False)
         self.sensitivity = WAKEWORD_CONFIG.get('sensitivity', 0.7)
-        self.model_path = WAKEWORD_CONFIG.get('model_path')
+        self.model_paths = WAKEWORD_CONFIG.get('model_paths', [])
         self.sample_rate = WAKEWORD_CONFIG.get('sample_rate', 16000)
         self.audio_device_index = WAKEWORD_CONFIG.get('audio_device_index')
         self.cooldown_period = WAKEWORD_CONFIG.get('cooldown_period', 3.0)
@@ -42,8 +42,8 @@ class WakeWordDetector(QObject):
         self.is_running = False
         self.last_detection_time = 0
         
-        # Wake word names (currently only "computer" supported)
-        self.wake_words = ["computer"]
+        # Wake word names, derived from model filenames
+        self.wake_words = [Path(path).stem.split('_')[0] for path in self.model_paths]
         
         # Setup detection thread
         self.detection_thread = None
@@ -52,7 +52,7 @@ class WakeWordDetector(QObject):
         # Auto start if configured
         if self.auto_start and self.is_enabled:
             self.start()
-            
+
     def start(self):
         """Start wake word detection"""
         if self.is_running:
@@ -62,10 +62,10 @@ class WakeWordDetector(QObject):
         logger.info("Starting wake word detection...")
         
         try:
-            # Initialize Porcupine wake word detector
+            # Initialize Porcupine wake word detector with multiple keywords
             self.porcupine = create_porcupine(
-                keyword_paths=[self.model_path],
-                sensitivities=[self.sensitivity]
+                keyword_paths=self.model_paths,
+                sensitivities=[self.sensitivity] * len(self.model_paths)
             )
             
             # Initialize PyAudio
@@ -97,7 +97,7 @@ class WakeWordDetector(QObject):
         except Exception as e:
             logger.error(f"Error starting wake word detection: {e}")
             self.cleanup()
-            
+
     def stop(self):
         """Stop wake word detection"""
         if not self.is_running:
@@ -117,7 +117,7 @@ class WakeWordDetector(QObject):
         
         self.is_running = False
         logger.info("Wake word detection stopped")
-        
+
     def cleanup(self):
         """Clean up resources"""
         if self.audio_stream:
@@ -148,7 +148,7 @@ class WakeWordDetector(QObject):
         else:
             self.start()
         return self.is_running
-        
+    
     def _detection_loop(self):
         """Main detection loop that runs in a separate thread"""
         logger.info("Wake word detection loop started")
@@ -180,7 +180,7 @@ class WakeWordDetector(QObject):
             logger.error(f"Error in wake word detection loop: {e}")
             
         logger.info("Wake word detection loop ended")
-        
+    
     def __del__(self):
         """Clean up on deletion"""
         self.stop()
@@ -207,4 +207,4 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print("\nExiting...")
     finally:
-        detector.stop() 
+        detector.stop()

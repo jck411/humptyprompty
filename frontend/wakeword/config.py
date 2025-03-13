@@ -6,8 +6,8 @@ import os
 from pathlib import Path
 
 # Path to the wake word model files
-WAKEWORD_DIR = Path(__file__).parent
-MODELS_DIR = WAKEWORD_DIR / "models"
+WAKEWORD_DIR = Path(__file__).parent.parent.parent
+MODELS_DIR = WAKEWORD_DIR / "wakeword_testing"
 
 # Create models directory if it doesn't exist
 os.makedirs(MODELS_DIR, exist_ok=True)
@@ -20,8 +20,11 @@ WAKEWORD_CONFIG = {
     # Sensitivity (higher = more sensitive, lower = fewer false positives)
     'sensitivity': 0.7,
     
-    # Wake word to use
-    'model_path': str(MODELS_DIR / "computer_en_linux_v3_0_0.ppn"),
+    # Wake word models to use
+    'model_paths': [
+        str(MODELS_DIR / "computer_en_linux_v3_0_0.ppn"),
+        str(MODELS_DIR / "stop-there_en_linux_v3_0_0.ppn"),
+    ],
     
     # Audio settings
     'sample_rate': 16000,
@@ -32,4 +35,4 @@ WAKEWORD_CONFIG = {
     
     # Auto start wake word detection on application start
     'auto_start': True,
-} 
+}
