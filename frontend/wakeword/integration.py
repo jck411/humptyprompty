@@ -4,7 +4,6 @@ Integration module to connect wake word detection with STT functionality
 """
 import os
 import asyncio
-import logging
 from pathlib import Path
 from PyQt6.QtCore import QObject, pyqtSignal, pyqtSlot
 
@@ -24,6 +23,23 @@ class WakeWordManager(QObject):
         super().__init__()
         self.chat_controller = chat_controller
         self.detector = WakeWordDetector()
+        
+        # Set up wake sound path
+        self.sounds_dir = Path(__file__).parent / "sounds"
+        self.computer_wake_sound = self.sounds_dir / "Wakesound_24kHz_mono_16-bit PCM.wav"
+        
+        # Pre-load the wake sound data
+        self.wake_sound_data = None
+        if self.computer_wake_sound.exists():
+            try:
+                # Just read the binary data directly
+                with open(self.computer_wake_sound, 'rb') as f:
+                    # Skip the WAV header (44 bytes) to get just the PCM data
+                    f.seek(44)  # Standard WAV header size
+                    self.wake_sound_data = f.read()
+                    logger.info(f"Loaded wake sound: {self.computer_wake_sound, len(self.wake_sound_data)} bytes")
+            except Exception as e:
+                logger.error(f"Error loading wake sound: {e}")
         
         # Connect signals
         self.detector.wake_word_detected.connect(self._on_wake_word_detected)
@@ -54,6 +70,18 @@ class WakeWordManager(QObject):
         self.detector.toggle()
         self.wake_word_state_changed.emit(self.detector.is_running)
     
+    def play_wake_sound(self):
+        """Play the wake sound using the application's audio manager"""
+        if self.chat_controller and self.wake_sound_data:
+            # Get a reference to the audio manager from the chat controller
+            audio_manager = self.chat_controller.audio_manager
+            if audio_manager:
+                # Put the wake sound data directly into the audio queue
+                audio_manager.audio_queue.put_nowait(self.wake_sound_data)
+                logger.info("Wake sound queued for playback")
+            else:
+                logger.warning("Audio manager not available, can't play wake sound")
+    
     @pyqtSlot(str)
     def _on_wake_word_detected(self, wake_word):
         """Handle wake word detection event"""
@@ -64,6 +92,11 @@ class WakeWordManager(QObject):
         
         # Activate STT if chat controller is available
         if self.chat_controller:
+            # Play wake sound for any wake word detection
+            if self.wake_sound_data:
+                logger.info(f"Playing wake sound for '{wake_word}'")
+                self.play_wake_sound()
+            
             if wake_word.lower() == "computer":
                 # Only activate STT if it's not already active
                 if not self.chat_controller.frontend_stt.is_enabled:

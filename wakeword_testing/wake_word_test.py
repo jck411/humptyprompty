@@ -14,8 +14,8 @@ from wakeword_testing.custom_porcupine import create as create_porcupine
 def get_keyword_file_paths():
     """Get the paths to the wake word model files"""
     base_dir = Path(__file__).parent.parent / "backend" / "wakewords"
-    stop_keyword_path = str(base_dir / "stop-there_en_linux_v3_0_0.ppn")
-    computer_keyword_path = str(base_dir / "computer_en_linux_v3_0_0.ppn")
+    stop_keyword_path = str(base_dir / "/home/jack/humptyprompty/wakeword_testing/stop-there_en_linux_v3_0_0.ppn")
+    computer_keyword_path = str(base_dir / "/home/jack/humptyprompty/wakeword_testing/computer_en_linux_v3_0_0.ppn")
     return stop_keyword_path, computer_keyword_path
 
 def main():
