@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import threading
+import time
 from queue import Queue
 from signal import SIGINT, SIGTERM
 import concurrent.futures
@@ -36,6 +37,11 @@ class DeepgramSTT(QObject):
         self.is_finals = []
         self.keepalive_active = False
         self.use_keepalive = STT_CONFIG.get('use_keepalive', True)
+        
+        # Timeout feature variables
+        self.inactivity_timeout = STT_CONFIG.get('inactivity_timeout', 30)  # seconds
+        self.last_activity_time = time.time()
+        self.timeout_timer = None
 
         # Create a dedicated event loop for Deepgram tasks and run it in a separate thread.
         self.dg_loop = asyncio.new_event_loop()
@@ -67,6 +73,7 @@ class DeepgramSTT(QObject):
         logging.debug("KeepAlive enabled: %s, timeout: %s seconds", 
                      DEEPGRAM_CONFIG.get('keepalive', True),
                      DEEPGRAM_CONFIG.get('keepalive_timeout', 30))
+        logging.debug("Inactivity timeout set to: %s seconds", self.inactivity_timeout)
 
         if STT_CONFIG['auto_start'] and self.is_enabled:
             self.set_enabled(True)
@@ -97,7 +104,27 @@ class DeepgramSTT(QObject):
         async def on_transcript(client, result, **kwargs):
             try:
                 transcript = result.channel.alternatives[0].transcript
-                if transcript.strip():
+
+                # Only reset timer if there's actual speech content
+                # We'll consider two conditions for activity:
+                # 1. There's an actual transcript with content
+                # 2. There's a speech_started event that's explicitly true
+                has_speech_content = transcript and transcript.strip()
+                is_speech_starting = hasattr(result, 'speech_started') and result.speech_started
+                
+                if has_speech_content or is_speech_starting:
+                    self._reset_activity_timer()
+                    
+                    # Log the reason for the reset
+                    if has_speech_content:
+                        # Fix the string formatting
+                        transcript_preview = transcript[:20] + "..." if len(transcript) > 20 else transcript
+                        logging.info(f"Activity timer reset due to speech content: '{transcript_preview}'")
+                    elif is_speech_starting:
+                        logging.info("Activity timer reset due to speech_started event")
+                
+                # Continue with normal processing
+                if has_speech_content:
                     # Add clear labels to distinguish between interim and final transcripts
                     if result.is_final:
                         confidence = result.channel.alternatives[0].confidence if hasattr(result.channel.alternatives[0], 'confidence') else 'N/A'
@@ -114,6 +141,8 @@ class DeepgramSTT(QObject):
                 # Log speech events if available
                 if hasattr(result, 'speech_final') and result.speech_final:
                     logging.info("[SPEECH EVENT] Speech segment ended")
+                elif hasattr(result, 'speech_started') and result.speech_started:
+                    logging.info("[SPEECH EVENT] Speech segment started")
                     
             except Exception as e:
                 logging.error("Error processing transcript: %s", str(e))
@@ -156,6 +185,19 @@ class DeepgramSTT(QObject):
             self.microphone = Microphone(self.dg_connection.send)
             self.microphone.start()
             
+            # Ensure the activity timer is freshly reset and started
+            # This ensures we have a clean slate for timing inactivity
+            self.last_activity_time = time.time()  # Direct assignment for certainty
+            self._cancel_inactivity_timer()  # Cancel any existing timer first
+            
+            # Explicitly log the timeout that will be used
+            logging.info(f"STT started with inactivity timeout of {self.inactivity_timeout} seconds")
+            
+            # Start the inactivity timer with a fresh timer task
+            self.timeout_timer = asyncio.run_coroutine_threadsafe(
+                self._check_inactivity(), self.dg_loop
+            )
+            
             self.state_changed.emit(self.is_enabled)
             logging.debug("STT started")
         except Exception as e:
@@ -164,6 +206,9 @@ class DeepgramSTT(QObject):
 
     async def _async_stop(self):
         try:
+            # Cancel the inactivity timer
+            self._cancel_inactivity_timer()
+            
             # Ensure keepalive is deactivated
             self.keepalive_active = False
             
@@ -419,3 +464,78 @@ class DeepgramSTT(QObject):
         [task.cancel() for task in tasks]
         await asyncio.gather(*tasks, return_exceptions=True)
         loop.stop()
+
+    # Inactivity timeout methods
+    def _reset_activity_timer(self):
+        """Reset the inactivity timer by updating the last activity timestamp"""
+        current_time = time.time()
+        
+        # Avoid excessive resets - only update if at least 0.5 seconds have passed
+        # This prevents constant updates from Deepgram events
+        if (current_time - self.last_activity_time) > 0.5:
+            self.last_activity_time = current_time
+            logging.info(f"Activity timer reset - will timeout in {self.inactivity_timeout} seconds if no speech detected")
+        # Otherwise, silently ignore the reset
+
+    def _start_inactivity_timer(self):
+        """Start the inactivity timeout timer"""
+        self._cancel_inactivity_timer()  # Cancel any existing timer first
+        self.timeout_timer = asyncio.run_coroutine_threadsafe(
+            self._check_inactivity(), self.dg_loop
+        )
+        logging.info(f"Inactivity timer started with timeout of {self.inactivity_timeout} seconds")
+        
+    def _cancel_inactivity_timer(self):
+        """Cancel the inactivity timeout timer if it exists"""
+        if self.timeout_timer and not self.timeout_timer.done():
+            self.timeout_timer.cancel()
+            self.timeout_timer = None
+            logging.info("Inactivity timer cancelled")
+            
+    async def _check_inactivity(self):
+        """Check for inactivity and turn off STT if threshold is exceeded"""
+        try:
+            logging.info(f"Starting inactivity check loop with timeout of {self.inactivity_timeout} seconds")
+            check_interval = 0.5  # Check more frequently (twice per second)
+            last_log_time = 0
+            
+            while self.is_enabled:
+                # Check if we've exceeded the inactivity timeout
+                current_time = time.time()
+                time_since_last_activity = current_time - self.last_activity_time
+                
+                # Log progress at most once every 5 seconds to avoid log spam
+                if current_time - last_log_time >= 5:
+                    logging.info(f"Inactivity timer: {time_since_last_activity:.1f}/{self.inactivity_timeout} seconds passed")
+                    last_log_time = current_time
+                
+                # Use a very strict comparison to ensure we timeout exactly on time
+                if time_since_last_activity >= self.inactivity_timeout:
+                    logging.info(f"TIMEOUT REACHED: No activity detected for {time_since_last_activity:.1f} seconds (threshold: {self.inactivity_timeout})")
+                    # Directly disable rather than scheduling it to ensure immediate action
+                    self.is_enabled = False  # Set flag immediately for other check loops
+                    await self._disable_on_timeout()
+                    break
+                
+                # Sleep for a short time to avoid high CPU usage
+                await asyncio.sleep(check_interval)
+        except asyncio.CancelledError:
+            # This is expected if the timer is cancelled
+            logging.debug("Inactivity check task cancelled")
+        except Exception as e:
+            logging.error(f"Error in inactivity check: {e}")
+            
+    async def _disable_on_timeout(self):
+        """Disable STT due to timeout - separated to ensure clean execution"""
+        try:
+            logging.info("Disabling STT due to inactivity timeout")
+            # Use set_enabled but protect against recursive calls
+            if self.is_enabled:  # This should be false already, but double-check
+                self.set_enabled(False)
+            else:
+                # Just ensure we clean up resources
+                self._stop_task = asyncio.run_coroutine_threadsafe(self._async_stop(), self.dg_loop)
+                self.enabled_changed.emit(False)
+                self.state_changed.emit(False)
+        except Exception as e:
+            logging.error(f"Error disabling STT on timeout: {e}")

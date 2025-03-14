@@ -7,6 +7,7 @@ STT_CONFIG: Dict[str, Any] = {
     'enabled': False,  # Global switch to enable/disable STT
     'auto_start': False,  # Whether to start STT automatically on initialization
     'use_keepalive': False,  # Whether to use KeepAlive for pausing/resuming during TTS
+    'inactivity_timeout': 5,  # Automatically turn off STT after N seconds of no transcription
 }
 
 # Audio capture configuration
@@ -38,5 +39,5 @@ DEEPGRAM_CONFIG = {
     
     # Connection settings
     'keepalive': True,  # Enable KeepAlive in the Deepgram connection
-    'keepalive_timeout': 30  # Seconds before the connection times out when in KeepAlive mode
+    'keepalive_timeout': 5  # Seconds before the connection times out when in KeepAlive mode
 }
