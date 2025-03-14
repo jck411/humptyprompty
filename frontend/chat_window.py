@@ -133,13 +133,6 @@ class ChatWindow(QMainWindow):
             self.showFullScreen()
             # Hide window frame
             self.setWindowFlags(self.windowFlags() | Qt.WindowType.FramelessWindowHint)
-            # Enable STT, TTS, and Auto-send
-            if not self.controller.stt_enabled:
-                self.controller.toggle_stt()
-            if not self.controller.tts_enabled:
-                asyncio.create_task(self.controller.toggle_tts_async())
-            if not self.controller.auto_send_enabled:
-                self.controller.toggle_auto_send()
             
             # Hide UI elements
             self.update_ui_visibility(False)
@@ -166,8 +159,8 @@ class ChatWindow(QMainWindow):
         self.input_area.text_input.setVisible(visible)
         self.input_area.send_button.setVisible(visible)
         
-        # Keep mic, stop, clear, and theme buttons visible
-        self.top_buttons.mic_button.setVisible(True)
+        # Keep stop, clear, and theme buttons visible
+        # Note: mic button visibility is controlled by STT listening state
         self.top_buttons.stop_button.setVisible(True)
         self.top_buttons.clear_button.setVisible(True)
         self.top_buttons.theme_button.setVisible(True)

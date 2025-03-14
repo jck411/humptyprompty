@@ -92,12 +92,13 @@ class WakeWordManager(QObject):
         
         # Activate STT if chat controller is available
         if self.chat_controller:
-            # Play wake sound for any wake word detection
-            if self.wake_sound_data:
-                logger.info(f"Playing wake sound for '{wake_word}'")
-                self.play_wake_sound()
-            
+            # Handle different wake words
             if wake_word.lower() == "computer":
+                # Play wake sound for "computer" wake word only
+                if self.wake_sound_data:
+                    logger.info(f"Playing wake sound for '{wake_word}'")
+                    self.play_wake_sound()
+                
                 # Only activate STT if it's not already active
                 if not self.chat_controller.frontend_stt.is_enabled:
                     logger.info("Activating STT based on wake word detection")
@@ -110,8 +111,8 @@ class WakeWordManager(QObject):
                         self.chat_controller.auto_send_state_changed.emit(True)
                 else:
                     logger.info("STT is already active, ignoring wake word")
-            elif wake_word.lower() == "stop-there":
-                # Stop TTS and text generation
+            elif wake_word.lower() in ["stop-there", "stop"]:  # Handle both formats in case of filename parsing issues
+                # Stop TTS and text generation (no sound played)
                 logger.info("Stopping TTS and generation based on wake word")
                 asyncio.create_task(self.chat_controller.stop_tts_and_generation_async())
                 

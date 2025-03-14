@@ -43,7 +43,17 @@ class WakeWordDetector(QObject):
         self.last_detection_time = 0
         
         # Wake word names, derived from model filenames
-        self.wake_words = [Path(path).stem.split('_')[0] for path in self.model_paths]
+        # Extract file stem and take everything before the first underscore, preserving hyphens
+        self.wake_words = []
+        for path in self.model_paths:
+            stem = Path(path).stem
+            if '_' in stem:
+                word = stem.split('_')[0]
+            else:
+                word = stem
+            self.wake_words.append(word)
+        
+        logger.info(f"Initialized wake words: {self.wake_words}")
         
         # Setup detection thread
         self.detection_thread = None
