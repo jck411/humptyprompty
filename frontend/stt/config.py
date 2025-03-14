@@ -39,6 +39,6 @@ DEEPGRAM_CONFIG = {
     # Connection settings
     'keepalive': {
         'enabled': True,  # Whether to use KeepAlive for the connection
-        'timeout': 8  # Seconds before the connection times out when in KeepAlive mode (sole timeout orchestrator)
+        'timeout': 12  # Seconds before the connection times out when in KeepAlive mode (sole timeout orchestrator)
     }
 }

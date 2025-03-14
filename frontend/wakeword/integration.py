@@ -113,13 +113,9 @@ class WakeWordManager(QObject):
                     logger.info("STT is already active, ignoring wake word")
             elif wake_word.lower() in ["stop-there", "stop"]:  # Handle both formats in case of filename parsing issues
                 # Stop TTS and text generation (no sound played)
-                logger.info("Stopping TTS and generation based on wake word")
+                # This acts like the stop button without turning off STT
+                logger.info("Stopping TTS and generation based on wake word without disabling STT")
                 asyncio.create_task(self.chat_controller.stop_tts_and_generation_async())
-                
-                # Disable STT if it's enabled
-                if self.chat_controller.frontend_stt.is_enabled:
-                    logger.info("Disabling STT based on wake word")
-                    self.chat_controller.toggle_stt()
         else:
             logger.warning("Chat controller not set, can't activate STT on wake word")
     
