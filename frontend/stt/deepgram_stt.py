@@ -36,10 +36,10 @@ class DeepgramSTT(QObject):
         self.is_paused = False
         self.is_finals = []
         self.keepalive_active = False
-        self.use_keepalive = STT_CONFIG.get('use_keepalive', True)
         
-        # Timeout feature variables
-        self.inactivity_timeout = STT_CONFIG.get('inactivity_timeout', 30)  # seconds
+        # Get keepalive settings from Deepgram config
+        self.keepalive_enabled = DEEPGRAM_CONFIG.get('keepalive', {}).get('enabled', False)
+        self.keepalive_timeout = DEEPGRAM_CONFIG.get('keepalive', {}).get('timeout', 10)  # seconds
         self.last_activity_time = time.time()
         self.timeout_timer = None
 
@@ -59,10 +59,11 @@ class DeepgramSTT(QObject):
         if not api_key:
             raise ValueError("Missing DEEPGRAM_API_KEY in environment variables")
         
-        # Initialize with new client options
-        keepalive_config = {"keepalive": "true"}
-        if DEEPGRAM_CONFIG.get('keepalive_timeout'):
-            keepalive_config["keepalive_timeout"] = str(DEEPGRAM_CONFIG.get('keepalive_timeout'))
+        # Initialize with client options directly from Deepgram config
+        keepalive_config = {}
+        if self.keepalive_enabled:
+            keepalive_config["keepalive"] = "true"
+            keepalive_config["keepalive_timeout"] = str(self.keepalive_timeout)
         
         config = DeepgramClientOptions(options=keepalive_config)
         self.deepgram = DeepgramClient(api_key, config)
@@ -70,10 +71,9 @@ class DeepgramSTT(QObject):
         self.microphone = None
 
         logging.debug("DeepgramSTT initialized with config: %s", DEEPGRAM_CONFIG)
-        logging.debug("KeepAlive enabled: %s, timeout: %s seconds", 
-                     DEEPGRAM_CONFIG.get('keepalive', True),
-                     DEEPGRAM_CONFIG.get('keepalive_timeout', 30))
-        logging.debug("Inactivity timeout set to: %s seconds", self.inactivity_timeout)
+        logging.debug("KeepAlive settings from Deepgram config: enabled=%s, timeout=%s seconds", 
+                     self.keepalive_enabled,
+                     self.keepalive_timeout)
 
         if STT_CONFIG['auto_start'] and self.is_enabled:
             self.set_enabled(True)
@@ -186,16 +186,16 @@ class DeepgramSTT(QObject):
             self.microphone.start()
             
             # Ensure the activity timer is freshly reset and started
-            # This ensures we have a clean slate for timing inactivity
+            # This ensures we have a clean slate for timing speech activity
             self.last_activity_time = time.time()  # Direct assignment for certainty
-            self._cancel_inactivity_timer()  # Cancel any existing timer first
+            self._cancel_keepalive_timer()  # Cancel any existing timer first
             
             # Explicitly log the timeout that will be used
-            logging.info(f"STT started with inactivity timeout of {self.inactivity_timeout} seconds")
+            logging.info(f"STT started with keepalive timeout of {self.keepalive_timeout} seconds")
             
-            # Start the inactivity timer with a fresh timer task
+            # Start the keepalive timer with a fresh timer task
             self.timeout_timer = asyncio.run_coroutine_threadsafe(
-                self._check_inactivity(), self.dg_loop
+                self._check_keepalive_timeout(), self.dg_loop
             )
             
             self.state_changed.emit(self.is_enabled)
@@ -206,8 +206,8 @@ class DeepgramSTT(QObject):
 
     async def _async_stop(self):
         try:
-            # Cancel the inactivity timer
-            self._cancel_inactivity_timer()
+            # Cancel the keepalive timer
+            self._cancel_keepalive_timer()
             
             # Ensure keepalive is deactivated
             self.keepalive_active = False
@@ -294,11 +294,16 @@ class DeepgramSTT(QObject):
             
         # Emit state changed to update UI
         self.state_changed.emit(not paused)
+        
+        # When unpausing (resuming), reset the activity timer to give a fresh timeout period
+        if not paused:
+            self.last_activity_time = time.time()
+            logging.info(f"Resuming from pause state - reset activity timer (timeout in {self.keepalive_timeout} seconds)")
             
         # Use the appropriate method based on whether we're pausing or resuming
         if self.dg_connection:
             if paused:
-                if self.use_keepalive:
+                if self.keepalive_enabled:
                     self._activate_keepalive()
                 else:
                     # If not using keepalive, we'll just stop the microphone
@@ -306,7 +311,7 @@ class DeepgramSTT(QObject):
                         self.microphone.finish()
                         self.microphone = None
             else:
-                if self.use_keepalive and self.keepalive_active:
+                if self.keepalive_enabled and self.keepalive_active:
                     self._deactivate_keepalive()
                 else:
                     # If not using keepalive or not active, restart the microphone
@@ -349,9 +354,10 @@ class DeepgramSTT(QObject):
         Send KeepAlive messages periodically to keep the connection open.
         """
         try:
-            # Send KeepAlive messages every 5 seconds (half the default 10-second timeout)
-            interval = 5
-            logging.debug(f"Starting KeepAlive message loop with {interval}s interval")
+            # Send KeepAlive messages at half the keepalive_timeout rate to ensure
+            # the connection stays alive while respecting the same timeout value
+            interval = max(1, self.keepalive_timeout / 2)  # minimum of 1 second, default would be 2.5s for 5s timeout
+            logging.debug(f"Starting KeepAlive message loop with {interval}s interval (based on keepalive_timeout: {self.keepalive_timeout}s)")
             
             while self.keepalive_active and self.dg_connection:
                 try:
@@ -465,70 +471,78 @@ class DeepgramSTT(QObject):
         await asyncio.gather(*tasks, return_exceptions=True)
         loop.stop()
 
-    # Inactivity timeout methods
+    # Keepalive timeout methods
     def _reset_activity_timer(self):
-        """Reset the inactivity timer by updating the last activity timestamp"""
+        """Reset the keepalive timer by updating the last activity timestamp"""
         current_time = time.time()
         
         # Avoid excessive resets - only update if at least 0.5 seconds have passed
         # This prevents constant updates from Deepgram events
         if (current_time - self.last_activity_time) > 0.5:
             self.last_activity_time = current_time
-            logging.info(f"Activity timer reset - will timeout in {self.inactivity_timeout} seconds if no speech detected")
+            logging.info(f"Activity timer reset - will timeout in {self.keepalive_timeout} seconds if no speech detected")
         # Otherwise, silently ignore the reset
 
-    def _start_inactivity_timer(self):
-        """Start the inactivity timeout timer"""
-        self._cancel_inactivity_timer()  # Cancel any existing timer first
+    def _start_keepalive_timer(self):
+        """Start the keepalive timeout timer"""
+        self._cancel_keepalive_timer()  # Cancel any existing timer first
         self.timeout_timer = asyncio.run_coroutine_threadsafe(
-            self._check_inactivity(), self.dg_loop
+            self._check_keepalive_timeout(), self.dg_loop
         )
-        logging.info(f"Inactivity timer started with timeout of {self.inactivity_timeout} seconds")
+        logging.info(f"Keepalive timer started with timeout of {self.keepalive_timeout} seconds")
         
-    def _cancel_inactivity_timer(self):
-        """Cancel the inactivity timeout timer if it exists"""
+    def _cancel_keepalive_timer(self):
+        """Cancel the keepalive timeout timer if it exists"""
         if self.timeout_timer and not self.timeout_timer.done():
             self.timeout_timer.cancel()
             self.timeout_timer = None
-            logging.info("Inactivity timer cancelled")
+            logging.info("Keepalive timer cancelled")
             
-    async def _check_inactivity(self):
-        """Check for inactivity and turn off STT if threshold is exceeded"""
+    async def _check_keepalive_timeout(self):
+        """Check for inactivity and turn off STT if keepalive threshold is exceeded"""
         try:
-            logging.info(f"Starting inactivity check loop with timeout of {self.inactivity_timeout} seconds")
+            logging.info(f"Starting keepalive check loop with timeout of {self.keepalive_timeout} seconds")
             check_interval = 0.5  # Check more frequently (twice per second)
             last_log_time = 0
             
             while self.is_enabled:
-                # Check if we've exceeded the inactivity timeout
-                current_time = time.time()
-                time_since_last_activity = current_time - self.last_activity_time
-                
-                # Log progress at most once every 5 seconds to avoid log spam
-                if current_time - last_log_time >= 5:
-                    logging.info(f"Inactivity timer: {time_since_last_activity:.1f}/{self.inactivity_timeout} seconds passed")
-                    last_log_time = current_time
-                
-                # Use a very strict comparison to ensure we timeout exactly on time
-                if time_since_last_activity >= self.inactivity_timeout:
-                    logging.info(f"TIMEOUT REACHED: No activity detected for {time_since_last_activity:.1f} seconds (threshold: {self.inactivity_timeout})")
-                    # Directly disable rather than scheduling it to ensure immediate action
-                    self.is_enabled = False  # Set flag immediately for other check loops
-                    await self._disable_on_timeout()
-                    break
+                # Only check for timeout if not paused - don't count down when TTS is playing
+                if not self.is_paused:
+                    # Check if we've exceeded the keepalive timeout
+                    current_time = time.time()
+                    time_since_last_activity = current_time - self.last_activity_time
+                    
+                    # Log progress at most once every 5 seconds to avoid log spam
+                    if current_time - last_log_time >= 5:
+                        logging.info(f"Keepalive timer: {time_since_last_activity:.1f}/{self.keepalive_timeout} seconds passed")
+                        last_log_time = current_time
+                    
+                    # Use a very strict comparison to ensure we timeout exactly on time
+                    if time_since_last_activity >= self.keepalive_timeout:
+                        logging.info(f"TIMEOUT REACHED: No activity detected for {time_since_last_activity:.1f} seconds (threshold: {self.keepalive_timeout})")
+                        # Directly disable rather than scheduling it to ensure immediate action
+                        self.is_enabled = False  # Set flag immediately for other check loops
+                        await self._disable_on_timeout()
+                        break
+                else:
+                    # If we're paused, just log less frequently to confirm we're not counting down
+                    current_time = time.time()
+                    if current_time - last_log_time >= 10:  # Log less frequently when paused
+                        logging.debug("Keepalive timer paused while system is in pause state (e.g., during TTS playback)")
+                        last_log_time = current_time
                 
                 # Sleep for a short time to avoid high CPU usage
                 await asyncio.sleep(check_interval)
         except asyncio.CancelledError:
             # This is expected if the timer is cancelled
-            logging.debug("Inactivity check task cancelled")
+            logging.debug("Keepalive check task cancelled")
         except Exception as e:
-            logging.error(f"Error in inactivity check: {e}")
+            logging.error(f"Error in keepalive check: {e}")
             
     async def _disable_on_timeout(self):
         """Disable STT due to timeout - separated to ensure clean execution"""
         try:
-            logging.info("Disabling STT due to inactivity timeout")
+            logging.info("Disabling STT due to keepalive timeout")
             # Use set_enabled but protect against recursive calls
             if self.is_enabled:  # This should be false already, but double-check
                 self.set_enabled(False)

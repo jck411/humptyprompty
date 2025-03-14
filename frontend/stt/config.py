@@ -6,8 +6,7 @@ from typing import Dict, Any
 STT_CONFIG: Dict[str, Any] = {
     'enabled': False,  # Global switch to enable/disable STT
     'auto_start': False,  # Whether to start STT automatically on initialization
-    'use_keepalive': False,  # Whether to use KeepAlive for pausing/resuming during TTS
-    'inactivity_timeout': 5,  # Automatically turn off STT after N seconds of no transcription
+    # Removed keepalive settings - now properly consolidated in DEEPGRAM_CONFIG
 }
 
 # Audio capture configuration
@@ -38,6 +37,8 @@ DEEPGRAM_CONFIG = {
     'vad_events': True,
     
     # Connection settings
-    'keepalive': True,  # Enable KeepAlive in the Deepgram connection
-    'keepalive_timeout': 5  # Seconds before the connection times out when in KeepAlive mode
+    'keepalive': {
+        'enabled': True,  # Whether to use KeepAlive for the connection
+        'timeout': 8  # Seconds before the connection times out when in KeepAlive mode (sole timeout orchestrator)
+    }
 }
