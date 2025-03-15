@@ -8,6 +8,51 @@ from frontend.config import SERVER_HOST, SERVER_PORT, WEBSOCKET_PATH, HTTP_BASE_
 from frontend.stt.config import STT_CONFIG
 import concurrent.futures
 
+async def send_with_timeout(method, url, timeout=10, **kwargs):
+    """
+    Send HTTP request with consistent timeout and error handling.
+    
+    Args:
+        method: HTTP method ('get', 'post', etc.)
+        url: Target URL
+        timeout: Timeout in seconds (default: 10)
+        **kwargs: Additional arguments to pass to the request
+        
+    Returns:
+        Response data or None on error
+        
+    Example usage:
+        data = await send_with_timeout('get', f"{base_url}/api/config")
+        if data:
+            # Process successful response
+    """
+    try:
+        async with aiohttp.ClientSession() as session:
+            request_method = getattr(session, method.lower())
+            async with request_method(
+                url, 
+                timeout=aiohttp.ClientTimeout(total=timeout),
+                **kwargs
+            ) as resp:
+                if resp.status == 200:
+                    try:
+                        return await resp.json()
+                    except Exception as e:
+                        logger.error(f"Error parsing JSON response from {url}: {e}")
+                        return None
+                else:
+                    logger.error(f"HTTP error: {resp.status} for {url}")
+                    return None
+    except asyncio.TimeoutError:
+        logger.error(f"Request to {url} timed out after {timeout}s")
+        return None
+    except aiohttp.ClientError as e:
+        logger.error(f"Client error in HTTP request to {url}: {e}")
+        return None
+    except Exception as e:
+        logger.error(f"Unexpected error in HTTP request to {url}: {e}")
+        return None
+
 class AsyncWebSocketClient(QObject):
     message_received = pyqtSignal(str)
     stt_text_received = pyqtSignal(str)
@@ -92,77 +137,55 @@ class AsyncWebSocketClient(QObject):
     
     async def toggle_tts(self):
         """Toggle text-to-speech on the server"""
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(f"{self.http_base_url}/api/toggle-tts") as resp:
-                    data = await resp.json()
-                    tts_enabled = data.get("tts_enabled", False)
-                    logger.info(f"TTS toggled, new state: {tts_enabled}")
-                    self.tts_state_changed.emit(tts_enabled)
-                    return tts_enabled
-        except Exception as e:
-            logger.error(f"Error toggling TTS: {e}")
-            return None
+        data = await send_with_timeout('post', f"{self.http_base_url}/api/toggle-tts")
+        if data:
+            tts_enabled = data.get("tts_enabled", False)
+            logger.info(f"TTS toggled, new state: {tts_enabled}")
+            self.tts_state_changed.emit(tts_enabled)
+            return tts_enabled
+        return None
     
     async def get_initial_tts_state(self):
         """Get the initial TTS state from the server"""
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(f"{self.http_base_url}/api/config") as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        return data.get("tts_enabled", False)
-                    else:
-                        logger.error(f"Failed to get initial TTS state: {resp.status}")
-                        return False
-        except Exception as e:
-            logger.error(f"Error getting initial TTS state: {e}")
-            return False
+        data = await send_with_timeout('get', f"{self.http_base_url}/api/config")
+        if data:
+            return data.get("tts_enabled", False)
+        return False
     
     async def get_all_initial_states(self):
         """Get all initial states from the server in a single request"""
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(f"{self.http_base_url}/api/config") as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        logger.info(f"Got all initial states: {data}")
-                        return data
-                    else:
-                        logger.error(f"Failed to get all initial states: {resp.status}")
-                        return None
-        except Exception as e:
-            logger.error(f"Error getting all initial states: {e}")
-            return None
+        data = await send_with_timeout('get', f"{self.http_base_url}/api/config")
+        if data:
+            logger.info(f"Got all initial states: {data}")
+            return data
+        return None
     
     async def stop_tts_and_generation(self):
         """Stop TTS and text generation on the server"""
         logger.info("Stopping TTS and generation")
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(f"{self.http_base_url}/api/stop-audio") as resp1:
-                    resp1_data = await resp1.json()
-                    logger.info(f"Stop TTS response: {resp1_data}")
-                    self.audio_stopped.emit()
-                
-                async with session.post(f"{self.http_base_url}/api/stop-generation") as resp2:
-                    resp2_data = await resp2.json()
-                    logger.info(f"Stop generation response: {resp2_data}")
-                    self.generation_stopped.emit()
-                
-                # After stopping generation, tell the server to use a fresh context next time
-                # This prevents the stopped response from continuing on the next message
-                if self.ws:
-                    try:
-                        await self.ws.send(json.dumps({"action": "reset-context"}))
-                        logger.info("Sent reset-context request to server")
-                    except Exception as e:
-                        logger.error(f"Error sending reset-context: {e}")
-                
-                return True
-        except Exception as e:
-            logger.error(f"Error stopping TTS and generation on server: {e}")
-            return False
+        
+        # Stop audio
+        resp1_data = await send_with_timeout('post', f"{self.http_base_url}/api/stop-audio")
+        if resp1_data:
+            logger.info(f"Stop TTS response: {resp1_data}")
+            self.audio_stopped.emit()
+        
+        # Stop generation
+        resp2_data = await send_with_timeout('post', f"{self.http_base_url}/api/stop-generation")
+        if resp2_data:
+            logger.info(f"Stop generation response: {resp2_data}")
+            self.generation_stopped.emit()
+        
+        # After stopping generation, tell the server to use a fresh context next time
+        # This prevents the stopped response from continuing on the next message
+        if self.ws:
+            try:
+                await self.ws.send(json.dumps({"action": "reset-context"}))
+                logger.info("Sent reset-context request to server")
+            except Exception as e:
+                logger.error(f"Error sending reset-context: {e}")
+        
+        return resp1_data is not None and resp2_data is not None
     
     async def send_playback_complete(self):
         """Send playback-complete notification to the server"""
