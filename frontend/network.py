@@ -72,6 +72,13 @@ class AsyncWebSocketClient(QObject):
         self.running = True
         self.messages = []
         self.http_base_url = HTTP_BASE_URL
+        
+        # Set up message type handlers
+        self.message_handlers = {
+            "stt": self._handle_stt_message,
+            "stt_state": self._handle_stt_state_message,
+            "tts_state": self._handle_tts_state_message,
+        }
 
     async def connect(self):
         ws_url = f"ws://{self.server_host}:{self.server_port}{self.websocket_path}"
@@ -83,38 +90,7 @@ class AsyncWebSocketClient(QObject):
             while self.running:
                 try:
                     message = await self.ws.recv()
-                    if isinstance(message, bytes):
-                        if message.startswith(b'audio:'):
-                            audio_data = message[len(b'audio:'):]
-                            logger.debug(f"Received audio chunk of size: {len(audio_data)} bytes")
-                            self.audio_received.emit(message)
-                        else:
-                            logger.warning("Received binary message without audio prefix")
-                            self.audio_received.emit(b'audio:' + message)
-                    else:
-                        try:
-                            data = json.loads(message)
-                            logger.debug(f"Received message: {data}")
-                            msg_type = data.get("type")
-                            if msg_type == "stt":
-                                stt_text = data.get("stt_text", "")
-                                logger.debug(f"Processing STT text immediately: {stt_text}")
-                                self.stt_text_received.emit(stt_text)
-                            elif msg_type == "stt_state":
-                                is_listening = data.get("is_listening", False)
-                                logger.debug(f"Updating STT state: listening = {is_listening}")
-                                self.stt_state_received.emit(is_listening)
-                            elif msg_type == "tts_state":
-                                is_enabled = data.get("tts_enabled", False)
-                                logger.debug(f"Updating TTS state: enabled = {is_enabled}")
-                                self.tts_state_changed.emit(is_enabled)
-                            elif "content" in data:
-                                self.message_received.emit(data["content"])
-                            else:
-                                logger.warning(f"Unknown message type: {data}")
-                        except json.JSONDecodeError:
-                            logger.error("Failed to parse JSON message")
-                            logger.error(f"Raw message: {message}")
+                    await self._process_message(message)
                 except Exception as e:
                     logger.error(f"WebSocket message processing error: {e}")
                     await asyncio.sleep(0.1)
@@ -123,6 +99,58 @@ class AsyncWebSocketClient(QObject):
             logger.error(f"WebSocket connection error: {e}")
         finally:
             self.connection_status.emit(False)
+    
+    async def _process_message(self, message):
+        """Process an incoming WebSocket message"""
+        # Handle binary messages
+        if isinstance(message, bytes):
+            self._process_binary_message(message)
+            return
+            
+        # Handle text messages
+        try:
+            data = json.loads(message)
+            logger.debug(f"Received message: {data}")
+            
+            # Dispatch to appropriate handler based on message type
+            msg_type = data.get("type")
+            if msg_type in self.message_handlers:
+                self.message_handlers[msg_type](data)
+            elif "content" in data:
+                self.message_received.emit(data["content"])
+            else:
+                logger.warning(f"Unknown message type: {data}")
+        except json.JSONDecodeError:
+            logger.error("Failed to parse JSON message")
+            logger.error(f"Raw message: {message}")
+    
+    def _process_binary_message(self, message):
+        """Process binary messages (typically audio data)"""
+        if message.startswith(b'audio:'):
+            audio_data = message[len(b'audio:'):]
+            logger.debug(f"Received audio chunk of size: {len(audio_data)} bytes")
+            self.audio_received.emit(message)
+        else:
+            logger.warning("Received binary message without audio prefix")
+            self.audio_received.emit(b'audio:' + message)
+    
+    def _handle_stt_message(self, data):
+        """Handle speech-to-text messages"""
+        stt_text = data.get("stt_text", "")
+        logger.debug(f"Processing STT text immediately: {stt_text}")
+        self.stt_text_received.emit(stt_text)
+    
+    def _handle_stt_state_message(self, data):
+        """Handle speech-to-text state updates"""
+        is_listening = data.get("is_listening", False)
+        logger.debug(f"Updating STT state: listening = {is_listening}")
+        self.stt_state_received.emit(is_listening)
+    
+    def _handle_tts_state_message(self, data):
+        """Handle text-to-speech state updates"""
+        is_enabled = data.get("tts_enabled", False)
+        logger.debug(f"Updating TTS state: enabled = {is_enabled}")
+        self.tts_state_changed.emit(is_enabled)
 
     async def send_message(self, message):
         if self.ws:
