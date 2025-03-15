@@ -264,6 +264,71 @@ class DeepgramSTT(QObject):
         logging.debug("Deepgram connection closed")
         self.set_enabled(False)
 
+    def restart_listening(self):
+        """
+        Restart active listening if STT is enabled but not actively listening.
+        This is typically used after a stop operation to resume STT.
+        """
+        logging.info("Restarting STT listening")
+        
+        # If STT is disabled, we can't restart listening
+        if not self.is_enabled:
+            logging.warning("Cannot restart listening because STT is disabled")
+            return False
+            
+        # If STT is paused, just unpause it
+        if self.is_paused:
+            logging.info("STT is paused, resuming")
+            self.set_paused(False)
+            self.state_changed.emit(True)  # Ensure UI updates
+            return True
+        
+        # If we have a connection but no microphone, try to restart just the microphone
+        if self.dg_connection and not self.microphone:
+            try:
+                logging.info("Connection exists but microphone is missing, creating new microphone")
+                self.microphone = Microphone(self.dg_connection.send)
+                self.microphone.start()
+                # Force emit state signals to ensure UI updates
+                self.state_changed.emit(True)
+                logging.info("Microphone restarted successfully")
+                return True
+            except Exception as e:
+                logging.error(f"Error restarting microphone: {e}")
+                # Fall through to full restart
+        
+        # If we still don't have working listening, perform a full restart
+        try:
+            # Use the existing handle_audio_state method which properly manages the state transitions
+            logging.info("Forcing full STT restart to resume listening")
+            
+            # Stop first with a short delay
+            self.handle_audio_state('disable', should_emit_signals=False)
+            
+            # Wait for the connection to fully close
+            if self._stop_task:
+                try:
+                    self._stop_task.result(timeout=2.0)  # Wait up to 2 seconds for stop to complete
+                except concurrent.futures.TimeoutError:
+                    logging.warning("Timed out waiting for STT to stop, continuing anyway")
+            
+            # Small delay to ensure clean restart
+            time.sleep(0.2)
+            
+            # Start a new connection
+            result = self.handle_audio_state('enable')
+            
+            # Force emit state signals to ensure UI updates
+            self.enabled_changed.emit(True)
+            self.state_changed.emit(True)
+            
+            logging.info(f"Full STT restart {'successful' if result else 'failed'}")
+            return result
+            
+        except Exception as e:
+            logging.error(f"Error restarting STT listening: {e}")
+            return False
+
     def handle_audio_state(self, action, should_emit_signals=True):
         """
         Consolidated method for handling audio state transitions.
@@ -397,6 +462,12 @@ class DeepgramSTT(QObject):
         if self.is_paused == paused:
             return
         
+        # If we're unpausing, ensure we reset the activity timer first
+        if self.is_paused and not paused:
+            self.last_activity_time = time.time()
+            logging.info(f"Explicitly setting last_activity_time when unpausing (reset timeout to {self.keepalive_timeout} seconds)")
+        
+        # Now perform the actual state transition
         self.handle_audio_state('pause' if paused else 'resume')
 
     def stop(self):
@@ -469,8 +540,18 @@ class DeepgramSTT(QObject):
             logging.info(f"Starting keepalive check loop with timeout of {self.keepalive_timeout} seconds")
             check_interval = 0.5  # Check more frequently (twice per second)
             last_log_time = 0
+            was_paused = False  # Track previous paused state for transitions
             
             while self.is_enabled:
+                # Check for transitions from paused to unpaused
+                if was_paused and not self.is_paused:
+                    # We just transitioned from paused to unpaused, reset timer
+                    self.last_activity_time = time.time()
+                    logging.info(f"Paused→Unpaused transition detected - reset activity timer (timeout in {self.keepalive_timeout} seconds)")
+                
+                # Update tracking of paused state
+                was_paused = self.is_paused
+                
                 # Only check for timeout if not paused - don't count down when TTS is playing
                 if not self.is_paused:
                     # Check if we've exceeded the keepalive timeout

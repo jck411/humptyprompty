@@ -206,8 +206,14 @@ class ChatController(QObject):
     async def stop_tts_and_generation_async(self):
         """Stop TTS and text generation asynchronously"""
         try:
+            logger.info("Starting stop procedure for TTS and generation")
             await self.ws_client.stop_tts_and_generation()
             await self.audio_manager.stop_audio()
+            
+            # Ensure STT state is correctly reflected in UI
+            if self.stt_enabled:
+                logger.info("Re-emitting STT state to ensure UI synchronization")
+                self.stt_state_changed.emit(self.stt_enabled, self.stt_listening)
             
             # Finalize the current assistant message
             self.finalize_assistant_message()
@@ -226,8 +232,27 @@ class ChatController(QObject):
                 ]
                 
                 logger.info("Reset WebSocketClient message history after stopping generation")
+            
+            # Final state check to ensure everything is synchronized
+            logger.info(f"Stop operation completed. STT enabled: {self.stt_enabled}, STT listening: {self.stt_listening}")
+            
+            # Important: If STT is enabled but not listening, restart it
+            # This ensures STT returns to listening state after stopping
+            if self.stt_enabled and not self.stt_listening:
+                logger.info("STT is enabled but not listening, restarting listening state")
+                await asyncio.sleep(0.5)  # Short delay to ensure everything has settled
+                self.frontend_stt.restart_listening()
+                logger.info("STT listening state restarted")
+                
         except Exception as e:
             logger.error(f"Error stopping TTS and generation: {e}")
+            # Even if there's an error, try to restart STT listening if it's enabled
+            if self.stt_enabled and hasattr(self, 'frontend_stt'):
+                logger.info("Trying to restart STT listening after error")
+                try:
+                    self.frontend_stt.restart_listening()
+                except Exception as inner_e:
+                    logger.error(f"Failed to restart STT listening: {inner_e}")
     
     def handle_connection_status(self, connected):
         """Handle connection status changes"""

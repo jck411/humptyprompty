@@ -78,6 +78,7 @@ class AsyncWebSocketClient(QObject):
             "stt": self._handle_stt_message,
             "stt_state": self._handle_stt_state_message,
             "tts_state": self._handle_tts_state_message,
+            "context_reset": self._handle_context_reset_message,
         }
 
     async def connect(self):
@@ -151,6 +152,12 @@ class AsyncWebSocketClient(QObject):
         is_enabled = data.get("tts_enabled", False)
         logger.debug(f"Updating TTS state: enabled = {is_enabled}")
         self.tts_state_changed.emit(is_enabled)
+        
+    def _handle_context_reset_message(self, data):
+        """Handle context reset confirmation from server"""
+        status = data.get("status", "")
+        logger.info(f"Context reset confirmation received with status: {status}")
+        # No action needed beyond logging as this is just a confirmation
 
     async def send_message(self, message):
         if self.ws:

@@ -4,6 +4,7 @@ import json
 import logging
 from PyQt6.QtCore import QObject, pyqtSignal, QMutex, QMutexLocker, QIODevice
 from PyQt6.QtMultimedia import QAudioFormat, QAudioSink, QMediaDevices, QAudio
+import time
 
 from frontend.config import logger
 
@@ -209,6 +210,15 @@ class AudioManager(QObject):
             await asyncio.sleep(0.1)
         if stt_handler.is_enabled:
             logger.info("Resuming STT after TTS finished playing")
+            # Give some time for the audio system to fully settle
+            await asyncio.sleep(0.2)
+            
+            # Reset the activity timer before resuming STT to ensure a fresh timeout period
+            # This is done by directly updating the last_activity_time
+            stt_handler.last_activity_time = time.time()
+            logger.info(f"Reset STT activity timer before unpausing (timeout in {stt_handler.keepalive_timeout} seconds)")
+            
+            # Now unpause STT
             stt_handler.set_paused(False)
     
     async def stop_audio(self):
@@ -217,13 +227,20 @@ class AudioManager(QObject):
         current_state = self.audio_sink.state()
         logger.info(f"Audio sink state before stopping: {current_state}")
         
+        # Reset state flags first to ensure UI updates properly
+        self.tts_audio_playing = False
+        
         # Stop audio sink if it's active
         if current_state == QAudio.State.ActiveState:
             logger.info("Audio sink is active; stopping it")
             self.audio_sink.stop()
-            logger.info("Audio sink stopped")
+            # Force emit state change for UI updates
+            self.audio_state_changed.emit(QAudio.State.StoppedState)
+            logger.info("Audio sink stopped and state change emitted")
         else:
             logger.info(f"Audio sink not active; current state: {current_state}")
+            # Still force a state update to ensure UI responds
+            self.audio_state_changed.emit(current_state)
 
         # Clear device buffer efficiently
         await asyncio.to_thread(self.audio_device.clear_and_mark_end)
@@ -235,9 +252,6 @@ class AudioManager(QObject):
                 self.audio_queue.task_done()
         except asyncio.QueueEmpty:
             pass
-        
-        # Reset state flags
-        self.tts_audio_playing = False
         
         # Add end-of-stream marker
         self.audio_queue.put_nowait(None)

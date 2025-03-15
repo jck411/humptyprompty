@@ -115,7 +115,52 @@ class WakeWordManager(QObject):
                 # Stop TTS and text generation (no sound played)
                 # This acts like the stop button without turning off STT
                 logger.info("Stopping TTS and generation based on wake word without disabling STT")
-                asyncio.create_task(self.chat_controller.stop_tts_and_generation_async())
+                
+                # Create a more robust handling of the stop action with a timeout
+                async def stop_with_timeout():
+                    try:
+                        # Set a timeout to avoid hanging if something goes wrong
+                        await asyncio.wait_for(
+                            self.chat_controller.stop_tts_and_generation_async(),
+                            timeout=5.0
+                        )
+                        logger.info("Stop operation successfully completed")
+                        
+                        # Important: After stopping is complete, ensure STT is actively listening
+                        # Wait a short moment to let things settle
+                        await asyncio.sleep(0.5)
+                        
+                        # If STT is enabled but not listening, restart it
+                        if (self.chat_controller.stt_enabled and 
+                            hasattr(self.chat_controller, 'frontend_stt') and 
+                            not self.chat_controller.stt_listening):
+                            logger.info("Re-activating STT listening after stop")
+                            self.chat_controller.frontend_stt.restart_listening()
+                    except asyncio.TimeoutError:
+                        logger.warning("Stop operation timed out, forcing audio stop")
+                        # Force a direct audio stop if the main stop times out
+                        if self.chat_controller and self.chat_controller.audio_manager:
+                            await self.chat_controller.audio_manager.stop_audio()
+                            # Still try to restart listening
+                            if (self.chat_controller.stt_enabled and
+                                hasattr(self.chat_controller, 'frontend_stt')):
+                                logger.info("Re-activating STT listening after timeout")
+                                self.chat_controller.frontend_stt.restart_listening()
+                    except Exception as e:
+                        logger.error(f"Error during stop operation: {e}")
+                        # Still try to reset audio state on error
+                        if self.chat_controller and self.chat_controller.audio_manager:
+                            await self.chat_controller.audio_manager.stop_audio()
+                            # Try to restart listening even after error
+                            if (self.chat_controller.stt_enabled and
+                                hasattr(self.chat_controller, 'frontend_stt')):
+                                logger.info("Re-activating STT listening after error")
+                                self.chat_controller.frontend_stt.restart_listening()
+                
+                # Launch the robust stop handler
+                asyncio.create_task(stop_with_timeout())
+            else:
+                logger.warning("Unknown wake word, can't activate STT")
         else:
             logger.warning("Chat controller not set, can't activate STT on wake word")
     
