@@ -64,6 +64,14 @@ async def unified_chat_websocket(websocket: WebSocket):
             data = await websocket.receive_json()
             action = data.get("action")
 
+            if action == "reset-context":
+                print("Resetting context for future messages...")
+                # Clear the stop event to ensure a fresh start for the next message
+                GEN_STOP_EVENT.clear()
+                # Acknowledge the reset
+                await websocket.send_json({"type": "context_reset", "status": "success"})
+                continue
+
             if action == "chat":
                 print("\nProcessing new chat message...")                
                 # Clear event for the new chat.

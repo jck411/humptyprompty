@@ -208,7 +208,24 @@ class ChatController(QObject):
         try:
             await self.ws_client.stop_tts_and_generation()
             await self.audio_manager.stop_audio()
+            
+            # Finalize the current assistant message
             self.finalize_assistant_message()
+            
+            # Important: Update the WebSocketClient's message history with the finalized message
+            # This ensures that on the next request, we don't get continuation of the previous answer
+            if self.messages:
+                # Get the latest assistant message (which we just finalized)
+                latest_messages = [msg for msg in self.messages]
+                
+                # Reset the WebSocketClient's message history with our local history
+                # This syncs the chat history between ChatController and WebSocketClient
+                self.ws_client.messages = [
+                    {"sender": "user" if msg["is_user"] else "assistant", "text": msg["text"]} 
+                    for msg in latest_messages
+                ]
+                
+                logger.info("Reset WebSocketClient message history after stopping generation")
         except Exception as e:
             logger.error(f"Error stopping TTS and generation: {e}")
     

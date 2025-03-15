@@ -150,6 +150,15 @@ class AsyncWebSocketClient(QObject):
                     logger.info(f"Stop generation response: {resp2_data}")
                     self.generation_stopped.emit()
                 
+                # After stopping generation, tell the server to use a fresh context next time
+                # This prevents the stopped response from continuing on the next message
+                if self.ws:
+                    try:
+                        await self.ws.send(json.dumps({"action": "reset-context"}))
+                        logger.info("Sent reset-context request to server")
+                    except Exception as e:
+                        logger.error(f"Error sending reset-context: {e}")
+                
                 return True
         except Exception as e:
             logger.error(f"Error stopping TTS and generation on server: {e}")
