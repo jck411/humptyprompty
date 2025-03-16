@@ -106,12 +106,9 @@ class BaseWindow(QMainWindow):
             # Hide navigation buttons
             self.show_navigation_buttons(False)
         
-        # Update top buttons if they exist
+        # Update top buttons if the subclass has implemented them
         if hasattr(self, 'top_buttons'):
-            logger.info(f"{self.__class__.__name__}: Updating top buttons for kiosk mode {self.is_kiosk_mode}")
             self.top_buttons.set_kiosk_mode(self.is_kiosk_mode)
-        else:
-            logger.warning(f"{self.__class__.__name__}: No top_buttons attribute found!")
         
         # Need to re-show the window after changing flags
         self.show()

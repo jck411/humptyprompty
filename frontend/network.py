@@ -241,32 +241,38 @@ class AsyncWebSocketClient(QObject):
         
     async def _close_websocket(self):
         """Safely close the WebSocket connection"""
-        if self.ws:
+        websocket = self.ws
+        if websocket:
             try:
-                await self.ws.close()
+                await websocket.close()
                 logger.info("WebSocket connection closed properly")
             except Exception as e:
                 logger.error(f"Error closing WebSocket connection: {e}")
-            finally:
-                self.ws = None
     
     def cleanup(self):
         """Clean up resources and close connections"""
         logger.info("Cleaning up AsyncWebSocketClient")
         self.running = False
         
-        # Create a task to close the websocket if it exists
-        if self.ws:
+        # Store current websocket reference and clear it immediately to prevent new operations
+        websocket = self.ws
+        self.ws = None
+        
+        # Only proceed with cleanup if there was an active websocket
+        if websocket:
             logger.info("Closing WebSocket connection")
             try:
                 # Get the current event loop or create a new one
                 try:
                     loop = asyncio.get_event_loop()
                     if loop.is_running():
-                        # If in a running event loop, schedule the close operation
-                        asyncio.create_task(self._close_websocket())
+                        # If in a running event loop, create a task but also store a reference to it
+                        # This prevents the task from being garbage collected before completion
+                        close_task = asyncio.create_task(self._close_websocket())
+                        # Optionally, could add a done callback to log completion
+                        # close_task.add_done_callback(lambda _: logger.debug("WebSocket close task completed"))
                     else:
-                        # If loop exists but isn't running, use it
+                        # If loop exists but isn't running, use it to run the coroutine to completion
                         loop.run_until_complete(self._close_websocket())
                 except RuntimeError:
                     # If no event loop exists, create a temporary one
@@ -276,7 +282,5 @@ class AsyncWebSocketClient(QObject):
                     loop.close()
             except Exception as e:
                 logger.error(f"Error during WebSocket cleanup: {e}")
-                # Fallback - at least set ws to None so connect loop will exit
-                self.ws = None
             
         logger.info("AsyncWebSocketClient cleanup complete")
