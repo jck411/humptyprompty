@@ -93,6 +93,9 @@ class BaseWindow(QMainWindow):
         self.is_kiosk_mode = not self.is_kiosk_mode
         logger.info(f"{self.__class__.__name__}: Toggling kiosk mode to {self.is_kiosk_mode}")
         
+        # Store current geometry before changing window flags
+        geometry = self.geometry()
+        
         if self.is_kiosk_mode:
             # Enter kiosk mode
             self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
@@ -103,6 +106,8 @@ class BaseWindow(QMainWindow):
             # Exit kiosk mode
             self.setWindowFlags(Qt.WindowType.Window)
             self.showNormal()
+            # Restore previous geometry
+            self.setGeometry(geometry)
             # Hide navigation buttons
             self.show_navigation_buttons(False)
         
@@ -150,5 +155,9 @@ class BaseWindow(QMainWindow):
     def closeEvent(self, event):
         """Handle window close event"""
         logger.info(f"Closing {self.__class__.__name__}")
-        self.window_closed.emit()
+        
+        # Only emit the window_closed signal for genuine close events, not during flag changes
+        if not event.spontaneous() or self.isVisible():
+            self.window_closed.emit()
+            
         super().closeEvent(event) 

@@ -55,6 +55,11 @@ class ChatWindow(BaseWindow):
         self.top_buttons.stop_clicked.connect(lambda: asyncio.create_task(self.controller.stop_tts_and_generation_async()))
         self.top_buttons.window_switch_requested.connect(self.window_switch_requested)
         
+        # Connect controller signals to top_buttons
+        self.controller.stt_state_changed.connect(self.top_buttons.update_stt_state)
+        self.controller.tts_state_changed.connect(self.top_buttons.update_tts_state)
+        self.controller.auto_send_state_changed.connect(self.top_buttons.update_auto_send_state)
+        
         # Connect input area signals
         self.input_area.send_clicked.connect(self.send_message)
         
@@ -62,6 +67,10 @@ class ChatWindow(BaseWindow):
         self.controller.message_received.connect(self.chat_area.update_assistant_message)
         self.controller.assistant_message_finalized.connect(self.chat_area.finalize_assistant_message)
         self.controller.connection_status_changed.connect(self.handle_connection_status)
+        
+        # Connect STT text signals
+        self.controller.interim_stt_text_received.connect(self.handle_interim_stt_text)
+        self.controller.final_stt_text_received.connect(self.handle_final_stt_text)
         
         # Connect theme changed signal from base window
         self.theme_changed.connect(self.handle_theme_changed)
@@ -86,6 +95,32 @@ class ChatWindow(BaseWindow):
             # Process message with controller
             self.controller.send_message(message)
             # Clear input area
+            self.input_area.clear_text()
+    
+    def handle_interim_stt_text(self, text):
+        """Handle interim STT text from speech recognition"""
+        if text.strip():
+            # Show interim text in input area, but don't send it
+            self.input_area.set_text(text)
+    
+    def handle_final_stt_text(self, text):
+        """Handle final STT text from speech recognition"""
+        if text.strip():
+            # Display the text in the input area
+            self.input_area.set_text(text)
+            
+            # Always add the transcribed text as a user message in the chat area
+            self.chat_area.add_message(text, is_user=True)
+            
+            # Auto-send vs manual handling:
+            # 1. If auto-send is enabled, the controller will send the message automatically
+            #    via its handle_final_stt_text method - no need to do anything here
+            # 2. If auto-send is disabled, we still want to add it to the chat history
+            #    but not send it to the backend
+            if not self.controller.auto_send_enabled:
+                self.controller.add_message(text, True)
+            
+            # Clear the input area regardless of auto-send status
             self.input_area.clear_text()
     
     def handle_connection_status(self, is_connected):

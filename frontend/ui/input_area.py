@@ -74,6 +74,16 @@ class InputArea(QWidget):
         """Clear the text input field"""
         self.text_input.clear()
     
+    def set_text(self, text):
+        """Set the text in the input field"""
+        self.text_input.setPlainText(text)
+        # Place cursor at the end of the text
+        cursor = self.text_input.textCursor()
+        cursor.movePosition(cursor.MoveOperation.End)
+        self.text_input.setTextCursor(cursor)
+        # Adjust height after setting text
+        self.adjust_text_input_height()
+    
     def update_colors(self, colors):
         """Update the color scheme"""
         self.colors = colors
