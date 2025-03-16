@@ -64,6 +64,10 @@ class WindowManager(QObject):
         # Show the chat window first (regardless of rotation order)
         self.show_window("chat")
         
+        # Disable automatic rotation by default
+        self.rotation_enabled = False
+        logger.info("Window rotation is disabled by default")
+        
         # Start the rotation timer if enabled (but only for kiosk mode)
         if self.rotation_enabled:
             self.rotation_timer.start(self.rotation_interval)

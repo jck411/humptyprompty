@@ -195,11 +195,19 @@ class ChatController(QObject):
         self.is_toggling_tts = True
         try:
             new_state = await self.ws_client.toggle_tts()
-            self.tts_enabled = new_state
-            self.tts_state_changed.emit(new_state)
-            logger.info(f"TTS toggled to: {new_state}")
+            # Check if new_state is None (connection error), keep current state in that case
+            if new_state is None:
+                logger.warning("Failed to toggle TTS state from server, keeping current state")
+                # Emit the current state instead of None
+                self.tts_state_changed.emit(self.tts_enabled)
+            else:
+                self.tts_enabled = new_state
+                self.tts_state_changed.emit(new_state)
+                logger.info(f"TTS toggled to: {new_state}")
         except Exception as e:
             logger.error(f"Error toggling TTS: {e}")
+            # Make sure we always emit a boolean value in case of other errors
+            self.tts_state_changed.emit(self.tts_enabled)
         finally:
             self.is_toggling_tts = False
     
