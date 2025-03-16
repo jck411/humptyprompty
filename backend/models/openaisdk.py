@@ -96,7 +96,7 @@ async def validate_messages_for_ws(messages: List[Dict[str, Any]]) -> List[Dict[
         if role is None:
             raise HTTPException(status_code=400, detail=f"Invalid sender at index {idx}.")
         prepared.append({"role": role, "content": text})
-    system_prompt = {"role": "system", "content": "You are a helpful assistant. Users live in Orlando, Fl"}
+    system_prompt = {"role": "system", "content": CONFIG["LLM_SETTINGS"]["SYSTEM_PROMPT"]}
     prepared.insert(0, system_prompt)
     return prepared
 

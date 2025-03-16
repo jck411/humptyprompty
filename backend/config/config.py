@@ -39,6 +39,10 @@ CONFIG: Dict[str, Any] = {
             "MODEL": "meta-llama/llama-3.1-70b-instruct"
         },
     },
+    "LLM_SETTINGS": {
+        "SYSTEM_PROMPT": 
+        "You are a home smart device audio assitant who gives conciseers live in Orlando, Fl",
+    },
     "GENERAL_AUDIO": {
         "TTS_ENABLED": True,
         "AUTO_SEND_ENABLED": False,
@@ -110,6 +114,6 @@ CONFIG: Dict[str, Any] = {
     "LOGGING": {
         "PRINT_SEGMENTS": True,
         "PRINT_TOOL_CALLS": True,
-        "PRINT_FUNCTION_CALLS": True
+        "PRINT_FUNCTION_CALLS": True,
     },
 }

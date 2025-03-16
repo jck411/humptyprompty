@@ -21,7 +21,7 @@ AUDIO_CONFIG = {
 DEEPGRAM_CONFIG = {
     # Core settings
     'language': 'en-US',
-    'model': 'nova-3',
+    'model': 'nova-2',
     
     # Audio settings
     'encoding': 'linear16',
