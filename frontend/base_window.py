@@ -157,7 +157,9 @@ class BaseWindow(QMainWindow):
         logger.info(f"Closing {self.__class__.__name__}")
         
         # Only emit the window_closed signal for genuine close events, not during flag changes
-        if not event.spontaneous() or self.isVisible():
+        # A genuine close is when the event is spontaneous (user initiated) or when it's 
+        # non-spontaneous but not coming from a window flag change operation
+        if event.spontaneous() and self.isVisible():
             self.window_closed.emit()
             
         super().closeEvent(event) 
