@@ -75,6 +75,7 @@ class ChatWindow(BaseWindow):
     def clear_chat(self):
         """Clear the chat area"""
         self.chat_area.clear()
+        self.controller.clear_chat_history()
     
     def send_message(self):
         """Send a message to the controller"""
