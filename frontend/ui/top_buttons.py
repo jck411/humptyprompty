@@ -173,6 +173,24 @@ class TopButtons(QWidget):
             }
         """)
         
+        # Create TTS toggle icon button for kiosk mode
+        self.tts_icon_button = QPushButton()
+        self.tts_icon_button.setFixedSize(45, 45)
+        self.tts_icon_button.setIcon(QIcon("frontend/icons/sound_on.svg"))
+        self.tts_icon_button.setIconSize(QSize(30, 30))
+        self.tts_icon_button.clicked.connect(self.on_tts_toggled)
+        self.tts_icon_button.setStyleSheet("""
+            QPushButton {
+                border: none;
+                border-radius: 20px;
+                background-color: transparent;
+            }
+            QPushButton:hover {
+                background-color: rgba(128, 128, 128, 0.1);
+            }
+        """)
+        self.tts_icon_button.setToolTip("Toggle text-to-speech")
+        
         # Create theme toggle button
         self.theme_button = QPushButton()
         self.theme_button.setFixedSize(45, 45)
@@ -225,6 +243,9 @@ class TopButtons(QWidget):
             
             # Add the stop button for stopping STT and responses
             self.main_layout.addWidget(self.stop_button)
+            
+            # Add the TTS icon button in kiosk mode
+            self.main_layout.addWidget(self.tts_icon_button)
             
             # Always show both navigation buttons regardless of current window
             self.main_layout.addWidget(self.chat_button)
@@ -310,7 +331,7 @@ class TopButtons(QWidget):
         logger.info(f"Updated STT button state: enabled={is_enabled}, listening={is_listening}")
     
     def update_tts_state(self, is_enabled):
-        """Update the TTS button state"""
+        """Update TTS button state based on controller state"""
         # Update button text
         self.tts_button.setText(f"TTS {'On' if is_enabled else 'Off'}")
         
@@ -331,6 +352,15 @@ class TopButtons(QWidget):
             
         # Force UI update
         self.tts_button.update()
+        
+        # Also update the icon for the kiosk mode TTS button
+        if is_enabled:
+            self.tts_icon_button.setIcon(QIcon("frontend/icons/sound_on.svg"))
+            self.tts_icon_button.setToolTip("Text-to-Speech: On (click to disable)")
+        else:
+            self.tts_icon_button.setIcon(QIcon("frontend/icons/sound_off.svg"))
+            self.tts_icon_button.setToolTip("Text-to-Speech: Off (click to enable)")
+        
         logger.info(f"Updated TTS button state: enabled={is_enabled}")
     
     def update_auto_send_state(self, is_enabled):
@@ -358,38 +388,54 @@ class TopButtons(QWidget):
         logger.info(f"Updated AUTO button state: enabled={is_enabled}")
     
     def update_icons(self, is_dark_mode):
-        """Update all icons based on current theme"""
-        # Store the current theme state
+        """Update the icon colors based on theme"""
         self.is_dark_mode = is_dark_mode
         
-        # Set theme icon
-        self.theme_button.setIcon(QIcon("frontend/icons/theme.svg"))
+        # The SVG icons are designed to work with both themes
+        # No color changes are needed for the icons
+        logger.info(f"Theme updated to {'dark' if is_dark_mode else 'light'} mode - icons remain unchanged")
         
-        # Update navigation icons to match the theme
-        self.chat_button.setIcon(QIcon())  # Clear the icon first
-        self.chat_button.setIcon(QIcon("frontend/icons/chat.svg"))
-        self.chat_button.setIconSize(QSize(30, 30))  # Reset icon size to force redraw
+        # If we need to refresh the icons for any reason, we can do it here
+        # but we don't need to change their colors
+        icon_widgets = [
+            self.clock_button, 
+            self.chat_button, 
+            self.mic_button, 
+            self.stop_button, 
+            self.clear_button, 
+            self.theme_button,
+            self.tts_icon_button
+        ]
         
-        self.clock_button.setIcon(QIcon())  # Clear the icon first
-        self.clock_button.setIcon(QIcon("frontend/icons/clock.svg"))
-        self.clock_button.setIconSize(QSize(30, 30))  # Reset icon size to force redraw
-        
-        logger.info(f"Updated all icons for {'dark' if is_dark_mode else 'light'} theme")
+        # Ensure icons are properly displayed
+        for widget in icon_widgets:
+            if hasattr(widget, 'iconSize') and callable(widget.iconSize):
+                current_size = widget.iconSize()
+                widget.setIconSize(QSize(current_size.width(), current_size.height()))
     
     def set_kiosk_mode(self, is_kiosk_mode):
-        """
-        Show or hide control buttons based on kiosk mode
-        
-        Args:
-            is_kiosk_mode: Whether kiosk mode is active
-        """
+        """Update UI for kiosk/fullscreen mode"""
         if self.is_kiosk_mode == is_kiosk_mode:
             return  # No change
-        
-        logger.info(f"TopButtons: Setting kiosk mode to {is_kiosk_mode}")
+            
+        logger.info(f"TopButtons: Updating for kiosk mode: {is_kiosk_mode}")
         self.is_kiosk_mode = is_kiosk_mode
-        self._update_layout() 
-
+        
+        # Update layout
+        self._update_layout()
+        
+        # If switching to kiosk mode, make sure the TTS icon reflects the current state
+        if is_kiosk_mode:
+            # Get current TTS state from the button
+            is_tts_enabled = self.tts_button.property("isTtsEnabled")
+            # Update the icon to match
+            if is_tts_enabled:
+                self.tts_icon_button.setIcon(QIcon("frontend/icons/sound_on.svg"))
+                self.tts_icon_button.setToolTip("Text-to-Speech: On (click to disable)")
+            else:
+                self.tts_icon_button.setIcon(QIcon("frontend/icons/sound_off.svg"))
+                self.tts_icon_button.setToolTip("Text-to-Speech: Off (click to enable)")
+    
     def showEvent(self, event):
         """Handle show event to ensure proper icon colors"""
         super().showEvent(event)

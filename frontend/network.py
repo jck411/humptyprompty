@@ -80,6 +80,9 @@ class AsyncWebSocketClient(QObject):
             "tts_state": self._handle_tts_state_message,
             "context_reset": self._handle_context_reset_message,
         }
+        
+        # Task registry to track pending tasks
+        self._pending_tasks = set()
 
     async def connect(self):
         ws_url = f"ws://{self.server_host}:{self.server_port}{self.websocket_path}"
@@ -239,6 +242,22 @@ class AsyncWebSocketClient(QObject):
         self.messages.clear()
         logger.info("Message history cleared")
         
+    def _register_task(self, task):
+        """Add a task to the pending tasks set and set up its cleanup callback."""
+        self._pending_tasks.add(task)
+        task.add_done_callback(self._remove_task)
+        return task
+    
+    def _remove_task(self, task):
+        """Remove a completed task from the pending tasks set."""
+        self._pending_tasks.discard(task)
+    
+    def _cancel_all_pending_tasks(self):
+        """Cancel all pending tasks."""
+        for task in self._pending_tasks:
+            if not task.done():
+                task.cancel()
+        
     async def _close_websocket(self):
         """Safely close the WebSocket connection"""
         websocket = self.ws
@@ -266,11 +285,25 @@ class AsyncWebSocketClient(QObject):
                 try:
                     loop = asyncio.get_event_loop()
                     if loop.is_running():
-                        # If in a running event loop, create a task but also store a reference to it
-                        # This prevents the task from being garbage collected before completion
-                        close_task = asyncio.create_task(self._close_websocket())
-                        # Optionally, could add a done callback to log completion
-                        # close_task.add_done_callback(lambda _: logger.debug("WebSocket close task completed"))
+                        # If in a running event loop, create a task and register it for tracking
+                        close_task = self._register_task(asyncio.create_task(self._close_websocket()))
+                        
+                        # Add a callback to log completion
+                        close_task.add_done_callback(
+                            lambda t: logger.debug(f"WebSocket close task completed: {t.cancelled()=}, {t.exception() if not t.cancelled() and t.done() else None}")
+                        )
+                        
+                        # Create a Future that will be completed when the close task is done
+                        # This ensures the task is properly tracked by the event loop
+                        future = asyncio.run_coroutine_threadsafe(self._wait_for_task_completion(close_task), loop)
+                        
+                        # Wait with a timeout to ensure we don't block indefinitely
+                        try:
+                            future.result(timeout=2.0)  # 2 seconds should be enough for a WebSocket to close
+                        except (asyncio.TimeoutError, concurrent.futures.TimeoutError):
+                            logger.warning("WebSocket close operation timed out, but continuing shutdown")
+                        except Exception as e:
+                            logger.error(f"Error waiting for WebSocket close task: {e}")
                     else:
                         # If loop exists but isn't running, use it to run the coroutine to completion
                         loop.run_until_complete(self._close_websocket())
@@ -283,4 +316,15 @@ class AsyncWebSocketClient(QObject):
             except Exception as e:
                 logger.error(f"Error during WebSocket cleanup: {e}")
             
+        # Cancel any remaining pending tasks
+        self._cancel_all_pending_tasks()
         logger.info("AsyncWebSocketClient cleanup complete")
+        
+    async def _wait_for_task_completion(self, task):
+        """Wait for a task to complete and handle any exceptions."""
+        try:
+            await task
+        except asyncio.CancelledError:
+            logger.debug("Task was cancelled")
+        except Exception as e:
+            logger.error(f"Task failed with exception: {e}")
