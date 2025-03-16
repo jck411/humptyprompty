@@ -239,44 +239,17 @@ class AsyncWebSocketClient(QObject):
         self.messages.clear()
         logger.info("Message history cleared")
         
-    async def _close_websocket(self):
-        """Close the WebSocket connection"""
-        if self.ws:
-            try:
-                await self.ws.close()
-                logger.info("WebSocket connection closed")
-            except Exception as e:
-                logger.error(f"Error closing WebSocket connection: {e}")
-            finally:
-                self.ws = None
-    
     def cleanup(self):
         """Clean up resources and close connections"""
         logger.info("Cleaning up AsyncWebSocketClient")
         self.running = False
         
-        try:
-            # Get the current event loop
-            try:
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    # If we're in a running event loop, use run_coroutine_threadsafe
-                    future = asyncio.run_coroutine_threadsafe(self._close_websocket(), loop)
-                    # Wait for a short time for the coroutine to complete
-                    try:
-                        future.result(timeout=1.0)
-                    except (asyncio.TimeoutError, concurrent.futures.TimeoutError):
-                        logger.warning("WebSocket cleanup timed out, but continuing shutdown")
-                else:
-                    # If loop exists but isn't running, use it
-                    loop.run_until_complete(self._close_websocket())
-            except RuntimeError:
-                # If no event loop exists in this thread, create a new one
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                loop.run_until_complete(self._close_websocket())
-                loop.close()
-        except Exception as e:
-            logger.error(f"Error during WebSocketClient cleanup: {e}")
-        
+        # Simply set the WebSocket to None - the connection loop will exit
+        # and the WebSocket will be closed by the library
+        if self.ws:
+            logger.info("Marking WebSocket for closure")
+            # Don't try to close it directly here, as it may cause event loop issues
+            # Just mark it as not running, and the connect loop will exit
+            self.ws = None
+            
         logger.info("AsyncWebSocketClient cleanup complete")

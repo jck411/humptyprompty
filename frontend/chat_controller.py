@@ -327,28 +327,28 @@ class ChatController(QObject):
         return is_running
     
     def cleanup(self):
-        """Clean up resources when shutting down"""
-        logger.info("Cleaning up chat controller resources")
+        """Clean up resources and release system resources"""
+        logger.info("Cleaning up Chat Controller resources...")
         
-        # Stop wake word detection
-        if hasattr(self, 'wake_word_manager'):
-            self.wake_word_manager.cleanup()
-            
-        # Cancel any running async tasks
+        # Cancel any running tasks
         for task in self.async_tasks:
             if not task.done():
+                logger.info(f"Cancelling task: {task}")
                 task.cancel()
         
         # Clean up audio
         if hasattr(self, 'audio_manager'):
+            logger.info("Cleaning up audio manager")
             self.audio_manager.cleanup()
             
         # Clean up STT
         if hasattr(self, 'frontend_stt'):
+            logger.info("Stopping STT service")
             self.frontend_stt.stop()
             
         # Clean up websocket
         if hasattr(self, 'ws_client'):
-            asyncio.create_task(self.ws_client.close())
+            logger.info("Cleaning up WebSocket client")
+            self.ws_client.cleanup()
         
         logger.info("Chat controller resources cleaned up") 
