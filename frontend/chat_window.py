@@ -41,7 +41,7 @@ class ChatWindow(BaseWindow):
         self.content_layout.addWidget(self.input_area)
         
         # Set initial states
-        self.top_buttons.update_theme_icon(self.is_dark_mode)
+        self.top_buttons.update_icons(self.is_dark_mode)
         self.top_buttons.set_kiosk_mode(self.is_kiosk_mode)
     
     def connect_signals(self):
@@ -68,7 +68,7 @@ class ChatWindow(BaseWindow):
     
     def handle_theme_changed(self, is_dark_mode):
         """Handle theme changes from the base window"""
-        self.top_buttons.update_theme_icon(is_dark_mode)
+        self.top_buttons.update_icons(is_dark_mode)
         self.chat_area.update_colors(self.colors)
         self.input_area.update_colors(self.colors)
     

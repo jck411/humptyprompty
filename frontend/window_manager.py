@@ -108,15 +108,6 @@ class WindowManager(QObject):
     
     def show_window(self, window_name: str):
         """Show a specific window and hide the current one"""
-        # Only allow navigation to other windows if in kiosk mode
-        # Exception: always allow navigation to chat window
-        if (window_name != "chat" and 
-            self.current_window_name != window_name and 
-            self.current_window and 
-            not self.current_window.is_kiosk_mode):
-            logger.info(f"Window switching to {window_name} not allowed outside of kiosk mode")
-            return
-
         if window_name == self.current_window_name and self.current_window and self.current_window.isVisible():
             logger.info(f"Window {window_name} is already visible")
             return

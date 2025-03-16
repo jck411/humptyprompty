@@ -40,7 +40,7 @@ class TopButtons(QWidget):
         self.is_dark_mode = True  # Default to dark mode
         
         # Update navigation icons for the initial theme
-        self.update_navigation_icons(self.is_dark_mode)
+        self.update_icons(self.is_dark_mode)
         
         # Update layout
         self._update_layout()
@@ -176,7 +176,7 @@ class TopButtons(QWidget):
         # Create theme toggle button
         self.theme_button = QPushButton()
         self.theme_button.setFixedSize(45, 45)
-        self.theme_button.setIcon(QIcon("frontend/icons/dark_mode.svg"))
+        self.theme_button.setIcon(QIcon("frontend/icons/theme.svg"))
         self.theme_button.setIconSize(QSize(35, 35))
         self.theme_button.clicked.connect(self.on_theme_toggled)
         self.theme_button.setStyleSheet("""
@@ -205,6 +205,9 @@ class TopButtons(QWidget):
             self.main_layout.addWidget(self.mic_button)
             self.main_layout.addWidget(self.stop_button)
             self.main_layout.addWidget(self.clear_button)
+            # Always show navigation buttons in the regular mode too
+            self.main_layout.addWidget(self.chat_button)
+            self.main_layout.addWidget(self.clock_button)
             self.main_layout.addWidget(self.theme_button)
             logger.info("TopButtons: Layout updated for regular mode")
         else:
@@ -217,21 +220,15 @@ class TopButtons(QWidget):
             )
             self.main_layout.addWidget(spacer, stretch=1)
             
-            # Get current window type
-            current_window_type = self.parent().parent().parent().__class__.__name__.lower().replace('window', '')
-            
-            # Add navigation buttons (don't show the button for the current window)
-            if current_window_type != "chat":
-                self.main_layout.addWidget(self.chat_button)
-            if current_window_type != "clock":
-                self.main_layout.addWidget(self.clock_button)
-            
+            # Always show both navigation buttons regardless of current window
+            self.main_layout.addWidget(self.chat_button)
+            self.main_layout.addWidget(self.clock_button)
             self.main_layout.addWidget(self.clear_button)
             self.main_layout.addWidget(self.theme_button)
-            logger.info(f"TopButtons: Layout updated for kiosk mode in {current_window_type} window")
+            logger.info("TopButtons: Layout updated for kiosk mode with all navigation buttons")
             
             # Explicitly update the navigation icons when layout changes
-            self.update_navigation_icons(self.is_dark_mode)
+            self.update_icons(self.is_dark_mode)
         
         # Update the layout
         self.updateGeometry()
@@ -316,56 +313,24 @@ class TopButtons(QWidget):
             style.polish(self.auto_send_button)
         self.auto_send_button.update()
     
-    def update_theme_icon(self, is_dark_mode):
-        """Update the theme button icon based on current theme"""
-        icon_path = "frontend/icons/light_mode.svg" if is_dark_mode else "frontend/icons/dark_mode.svg"
-        self.theme_button.setIcon(QIcon(icon_path))
-        
-        # Also update navigation icons to match the theme
-        self.update_navigation_icons(is_dark_mode)
-    
-    def update_navigation_icons(self, is_dark_mode):
-        """Update navigation icons to match the current theme"""
+    def update_icons(self, is_dark_mode):
+        """Update all icons based on current theme"""
         # Store the current theme state
         self.is_dark_mode = is_dark_mode
         
-        # Set fill color to match other icons
-        fill_color = "#565f89" if is_dark_mode else "#333333"
+        # Set theme icon
+        self.theme_button.setIcon(QIcon("frontend/icons/theme.svg"))
         
-        # Create custom SVGs with the right fill color
-        chat_svg = f'<svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="{fill_color}"><path d="M240-400h320v-80H240v80Zm0-120h480v-80H240v80Zm0-120h480v-80H240v80ZM80-80v-720q0-33 23.5-56.5T160-880h640q33 0 56.5 23.5T880-800v480q0 33-23.5 56.5T800-240H240L80-80Zm126-240h594v-480H160v525l46-45Zm-46 0v-480 480Z"/></svg>'
-        
-        clock_svg = f'<svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="{fill_color}"><path d="M480-80q-83 0-156-31.5T197-197q-54-54-85.5-127T80-480q0-83 31.5-156T197-763q54-54 127-85.5T480-880q83 0 156 31.5T763-763q54 54 85.5 127T880-480q0 83-31.5 156T763-197q-54 54-127 85.5T480-80Zm0-80q134 0 227-93t93-227q0-134-93-227t-227-93q-134 0-227 93t-93 227q0 134 93 227t227 93Zm0-320Zm-40 120v-240h80v240h-80Z"/></svg>'
-        
-        # Ensure temp directory exists
-        temp_dir = os.path.join(tempfile.gettempdir(), "humptyprompty_icons")
-        os.makedirs(temp_dir, exist_ok=True)
-        
-        # Create temp SVG files with unique timestamps to avoid caching issues
-        timestamp = int(os.path.getmtime(__file__)) if os.path.exists(__file__) else int(time.time())
-        
-        chat_path = os.path.join(temp_dir, f"chat_{fill_color.replace('#', '')}_{timestamp}.svg")
-        clock_path = os.path.join(temp_dir, f"clock_{fill_color.replace('#', '')}_{timestamp}.svg")
-        
-        # Only write the files if they don't exist
-        if not os.path.exists(chat_path):
-            with open(chat_path, "w") as f:
-                f.write(chat_svg)
-                
-        if not os.path.exists(clock_path):
-            with open(clock_path, "w") as f:
-                f.write(clock_svg)
-        
-        # Update icons with QIcon.fromTheme to disable caching
+        # Update navigation icons to match the theme
         self.chat_button.setIcon(QIcon())  # Clear the icon first
-        self.chat_button.setIcon(QIcon(chat_path))
+        self.chat_button.setIcon(QIcon("frontend/icons/chat.svg"))
         self.chat_button.setIconSize(QSize(30, 30))  # Reset icon size to force redraw
         
         self.clock_button.setIcon(QIcon())  # Clear the icon first
-        self.clock_button.setIcon(QIcon(clock_path))
+        self.clock_button.setIcon(QIcon("frontend/icons/clock.svg"))
         self.clock_button.setIconSize(QSize(30, 30))  # Reset icon size to force redraw
         
-        logger.info(f"Updated navigation icons for {'dark' if is_dark_mode else 'light'} theme")
+        logger.info(f"Updated all icons for {'dark' if is_dark_mode else 'light'} theme")
     
     def set_kiosk_mode(self, is_kiosk_mode):
         """
@@ -385,5 +350,5 @@ class TopButtons(QWidget):
         """Handle show event to ensure proper icon colors"""
         super().showEvent(event)
         # Always update icons when the widget becomes visible
-        self.update_navigation_icons(self.is_dark_mode)
+        self.update_icons(self.is_dark_mode)
         logger.info("TopButtons: Updated icons on show event") 

@@ -39,6 +39,7 @@ class ClockWindow(BaseWindow):
         
         # Set initial state for kiosk mode
         self.top_buttons.set_kiosk_mode(self.is_kiosk_mode)
+        self.top_buttons.update_icons(self.is_dark_mode)
         
         # Create container widget with centered alignment
         clock_container = QWidget()
@@ -70,7 +71,7 @@ class ClockWindow(BaseWindow):
     def handle_theme_changed(self, is_dark_mode):
         """Handle theme changes"""
         if hasattr(self, 'top_buttons'):
-            self.top_buttons.update_theme_icon(is_dark_mode)
+            self.top_buttons.update_icons(is_dark_mode)
     
     @pyqtSlot()
     def update_time(self):
