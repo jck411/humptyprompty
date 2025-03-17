@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-from PyQt6.QtWidgets import QWidget, QHBoxLayout, QVBoxLayout, QPushButton
+from PyQt6.QtWidgets import QWidget, QHBoxLayout, QVBoxLayout, QPushButton, QSizePolicy
 from PyQt6.QtCore import pyqtSignal, QSize
 from PyQt6.QtGui import QIcon, QColor, QPalette
+from frontend.icons import get_icon  # Import the centralized icon getter
 
 from frontend.ui.text_input import CustomTextEdit
 
@@ -40,7 +41,7 @@ class InputArea(QWidget):
         # Create send button
         self.send_button = QPushButton()
         self.send_button.setFixedSize(50, 50)
-        self.send_button.setIcon(QIcon("frontend/icons/send.svg"))
+        self.send_button.setIcon(get_icon('send'))
         self.send_button.setIconSize(QSize(24, 24))
         self.send_button.clicked.connect(self.on_send_clicked)
         

@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 from PyQt6.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer
-from PyQt6.QtGui import QIcon
 
 from frontend.style import DARK_COLORS, LIGHT_COLORS, generate_main_stylesheet
 from frontend.config import logger
@@ -16,6 +15,15 @@ class BaseWindow(QMainWindow):
     window_closed = pyqtSignal()
     window_switch_requested = pyqtSignal(str)  # Emitted when user wants to switch to another window
     
+    # Dictionary mapping window types to their corresponding classes
+    # This will be populated by each window class during module initialization
+    WINDOW_CLASSES = {}
+    
+    @classmethod
+    def register_window_class(cls, window_type, window_class):
+        """Register a window class with its type identifier"""
+        cls.WINDOW_CLASSES[window_type] = window_class
+        
     def __init__(self, title="Smart Display"):
         super().__init__()
         self.setWindowTitle(title)
@@ -92,7 +100,19 @@ class BaseWindow(QMainWindow):
         self.setStyleSheet(generate_main_stylesheet(self.colors))
     
     def add_navigation_button(self, window_name, display_name):
-        """Add a navigation button for switching to another window"""
+        """
+        Add a navigation button for switching to another window
+        
+        This method creates a button that emits the window_switch_requested signal
+        when clicked, which is then handled by the WindowManager.
+        
+        Args:
+            window_name (str): The name/type of the window to switch to
+            display_name (str): The text to display on the button
+            
+        Returns:
+            QPushButton: The created button
+        """
         button = QPushButton(display_name)
         button.setFixedHeight(32)
         button.clicked.connect(lambda: self.window_switch_requested.emit(window_name))
@@ -104,7 +124,60 @@ class BaseWindow(QMainWindow):
         self.is_dark_mode = not self.is_dark_mode
         self.colors = DARK_COLORS if self.is_dark_mode else LIGHT_COLORS
         self.apply_styling()
+        
+        # Update child components if they exist and have the appropriate update methods
+        self._update_theme_in_components()
+        
+        # Emit signal for any external components that need to respond to theme changes
         self.theme_changed.emit(self.is_dark_mode)
+    
+    def _update_theme_in_components(self):
+        """
+        Update theme colors in all child components that support theme changes.
+        This method looks for components with update_icons or update_colors methods
+        and calls them with the appropriate parameters.
+        """
+        # Common component attribute names used in subclasses
+        component_attributes = [
+            'top_buttons', 'chat_area', 'input_area', 
+            'clock_display', 'settings_panel',  # Add other potential components here
+        ]
+        
+        for attr_name in component_attributes:
+            component = getattr(self, attr_name, None)
+            if component:
+                # Update icons if the component has this method
+                if hasattr(component, 'update_icons'):
+                    component.update_icons(self.is_dark_mode)
+                
+                # Update colors if the component has this method
+                if hasattr(component, 'update_colors'):
+                    component.update_colors(self.colors)
+
+    def _update_kiosk_mode_in_components(self):
+        """
+        Update kiosk mode state in all child components that support kiosk mode.
+        This method looks for components with set_kiosk_mode method and calls it 
+        with the current kiosk mode state. It also handles visibility of components
+        that should be hidden in kiosk mode (like input areas).
+        """
+        # Common component attribute names used in subclasses
+        component_attributes = [
+            'top_buttons', 'chat_area', 'input_area', 
+            'clock_display', 'settings_panel',  # Add other potential components here
+        ]
+        
+        for attr_name in component_attributes:
+            component = getattr(self, attr_name, None)
+            if component:
+                # Update kiosk mode if the component has this method
+                if hasattr(component, 'set_kiosk_mode'):
+                    component.set_kiosk_mode(self.is_kiosk_mode)
+                
+                # Special handling for input area - hide in kiosk mode
+                if attr_name == 'input_area':
+                    component.setVisible(not self.is_kiosk_mode)
+                    logger.info(f"{self.__class__.__name__}: Input area visibility set to {not self.is_kiosk_mode}")
     
     def toggle_kiosk_mode(self):
         """Toggle fullscreen/kiosk mode"""
@@ -118,32 +191,31 @@ class BaseWindow(QMainWindow):
         if not was_kiosk_mode:
             self.previous_geometry = self.geometry()
         
-        # First, hide the window while we change its properties to prevent visual glitches
+        # Hide the window while we change its properties
         self.hide()
         
         if self.is_kiosk_mode:
             # Enter kiosk mode
             self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
             self.show()
-            # Explicitly call showFullScreen() after show() to ensure proper fullscreen state
-            QTimer.singleShot(50, self.showFullScreen)
+            # Call showFullScreen directly without delay
+            self.showFullScreen()
         else:
             # Exit kiosk mode
             self.setWindowFlags(Qt.WindowType.Window)
             self.show()
-            # Explicitly call showNormal() after show() to ensure proper window state
-            QTimer.singleShot(50, self.showNormal)
+            # Call showNormal directly without delay
+            self.showNormal()
             
             # Restore previous geometry if available
             if self.previous_geometry:
-                QTimer.singleShot(100, lambda: self.setGeometry(self.previous_geometry))
+                self.setGeometry(self.previous_geometry)
             
             # Hide navigation buttons
             self.show_navigation_buttons(False)
         
-        # Update top buttons if the subclass has implemented them
-        if hasattr(self, 'top_buttons'):
-            self.top_buttons.set_kiosk_mode(self.is_kiosk_mode)
+        # Update all UI components based on kiosk mode
+        self._update_kiosk_mode_in_components()
     
     def show_navigation_buttons(self, visible):
         """Show or hide navigation buttons"""
@@ -163,20 +235,67 @@ class BaseWindow(QMainWindow):
                 # If toggling to kiosk mode and we have at least one navigation window available,
                 # switch to clock window after a short delay
                 if self.is_kiosk_mode and self.nav_layout.count() > 0:
-                    QTimer.singleShot(500, lambda: self.window_switch_requested.emit("clock"))
+                    # Use the window_switch_requested signal to let the WindowManager handle the switch
+                    # This ensures proper state management and transitions
+                    window_type = "clock"
+                    QTimer.singleShot(500, lambda: self.window_switch_requested.emit(window_type))
             # For other windows in kiosk mode, return to the default window (typically chat)
             elif self.is_kiosk_mode:
-                self.window_switch_requested.emit(self.get_default_window_to_switch())
+                window_type = self.get_default_window_to_switch()
+                self.window_switch_requested.emit(window_type)
         else:
             super().keyPressEvent(event)
+    
+    def switch_window(self, window_type):
+        """
+        Switch to the specified window type using the WINDOW_CLASSES dictionary
+        
+        This method creates and shows a new window instance directly, without going
+        through the WindowManager. For most cases, it's better to emit the 
+        window_switch_requested signal to let the WindowManager handle the switch
+        properly with state management and transitions.
+        
+        Use this method when you need direct control over window switching and
+        don't need the WindowManager's features.
+        
+        Example:
+            # Switch directly to the chat window
+            self.switch_window("chat")
+            
+            # Or, to let the WindowManager handle it (recommended):
+            self.window_switch_requested.emit("chat")
+        
+        Args:
+            window_type (str): The type of window to switch to
+            
+        Returns:
+            bool: True if successful, False if window type is unknown
+        """
+        if window_type in self.WINDOW_CLASSES:
+            # Create a new instance of the window class
+            new_window = self.WINDOW_CLASSES[window_type]()
+            
+            # Show the new window
+            new_window.show()
+            
+            # Hide the current window
+            self.hide()
+            
+            return True
+        else:
+            logger.warning(f"Unknown window type: {window_type}")
+            return False
     
     def showEvent(self, event):
         """Handle window show event - ensure proper fullscreen state"""
         # If in kiosk mode, ensure the window is in fullscreen
         if self.is_kiosk_mode:
             logger.info(f"{self.__class__.__name__}: Ensuring fullscreen in kiosk mode")
-            # Use a small delay to ensure the window is fully shown before going fullscreen
-            QTimer.singleShot(50, self.showFullScreen)
+            # Call showFullScreen directly without delay
+            self.showFullScreen()
+            
+            # Ensure all components are properly updated for kiosk mode
+            self._update_kiosk_mode_in_components()
             
         super().showEvent(event)
     

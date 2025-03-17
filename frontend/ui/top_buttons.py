@@ -3,6 +3,7 @@ from PyQt6.QtWidgets import QWidget, QHBoxLayout, QPushButton
 from PyQt6.QtCore import pyqtSignal, QSize
 from PyQt6.QtGui import QIcon, QPainter, QColor
 from frontend.config import logger
+from frontend.icons import get_icon  # Import the centralized icon getter
 import PyQt6.QtWidgets
 import PyQt6.QtGui
 import os
@@ -86,7 +87,7 @@ class TopButtons(QWidget):
         # Create clock navigation button
         self.clock_button = QPushButton()
         self.clock_button.setFixedSize(45, 45)
-        self.clock_button.setIcon(QIcon("frontend/icons/clock.svg"))
+        self.clock_button.setIcon(get_icon('clock'))
         self.clock_button.setIconSize(QSize(30, 30))
         self.clock_button.clicked.connect(lambda: self.window_switch_requested.emit("clock"))
         self.clock_button.setStyleSheet("""
@@ -103,7 +104,7 @@ class TopButtons(QWidget):
         # Create chat navigation button
         self.chat_button = QPushButton()
         self.chat_button.setFixedSize(45, 45)
-        self.chat_button.setIcon(QIcon("frontend/icons/chat.svg"))
+        self.chat_button.setIcon(get_icon('chat'))
         self.chat_button.setIconSize(QSize(30, 30))
         self.chat_button.clicked.connect(lambda: self.window_switch_requested.emit("chat"))
         self.chat_button.setStyleSheet("""
@@ -125,7 +126,7 @@ class TopButtons(QWidget):
         # Create mic indicator button (only visible when listening)
         self.mic_button = QPushButton()
         self.mic_button.setFixedSize(45, 45)
-        self.mic_button.setIcon(QIcon("frontend/icons/mic.svg"))
+        self.mic_button.setIcon(get_icon('mic'))
         self.mic_button.setIconSize(QSize(30, 30))
         self.mic_button.setStyleSheet("""
             QPushButton {
@@ -142,7 +143,7 @@ class TopButtons(QWidget):
         # Create stop button
         self.stop_button = QPushButton()
         self.stop_button.setFixedSize(45, 45)
-        self.stop_button.setIcon(QIcon("frontend/icons/stop_all.svg"))
+        self.stop_button.setIcon(get_icon('stop_all'))
         self.stop_button.setIconSize(QSize(30, 30))
         self.stop_button.clicked.connect(self.on_stop_clicked)
         self.stop_button.setStyleSheet("""
@@ -159,7 +160,7 @@ class TopButtons(QWidget):
         # Create clear chat button
         self.clear_button = QPushButton()
         self.clear_button.setFixedSize(45, 45)
-        self.clear_button.setIcon(QIcon("frontend/icons/clear_all.svg"))
+        self.clear_button.setIcon(get_icon('clear_all'))
         self.clear_button.setIconSize(QSize(30, 30))
         self.clear_button.clicked.connect(self.on_clear_clicked)
         self.clear_button.setStyleSheet("""
@@ -176,7 +177,7 @@ class TopButtons(QWidget):
         # Create TTS toggle icon button for kiosk mode
         self.tts_icon_button = QPushButton()
         self.tts_icon_button.setFixedSize(45, 45)
-        self.tts_icon_button.setIcon(QIcon("frontend/icons/sound_on.svg"))
+        self.tts_icon_button.setIcon(get_icon('sound_on'))
         self.tts_icon_button.setIconSize(QSize(30, 30))
         self.tts_icon_button.clicked.connect(self.on_tts_toggled)
         self.tts_icon_button.setStyleSheet("""
@@ -194,7 +195,7 @@ class TopButtons(QWidget):
         # Create theme toggle button
         self.theme_button = QPushButton()
         self.theme_button.setFixedSize(45, 45)
-        self.theme_button.setIcon(QIcon("frontend/icons/theme.svg"))
+        self.theme_button.setIcon(get_icon('theme'))
         self.theme_button.setIconSize(QSize(35, 35))
         self.theme_button.clicked.connect(self.on_theme_toggled)
         self.theme_button.setStyleSheet("""
@@ -355,10 +356,10 @@ class TopButtons(QWidget):
         
         # Also update the icon for the kiosk mode TTS button
         if is_enabled:
-            self.tts_icon_button.setIcon(QIcon("frontend/icons/sound_on.svg"))
+            self.tts_icon_button.setIcon(get_icon('sound_on'))
             self.tts_icon_button.setToolTip("Text-to-Speech: On (click to disable)")
         else:
-            self.tts_icon_button.setIcon(QIcon("frontend/icons/sound_off.svg"))
+            self.tts_icon_button.setIcon(get_icon('sound_off'))
             self.tts_icon_button.setToolTip("Text-to-Speech: Off (click to enable)")
         
         logger.info(f"Updated TTS button state: enabled={is_enabled}")
@@ -430,10 +431,10 @@ class TopButtons(QWidget):
             is_tts_enabled = self.tts_button.property("isTtsEnabled")
             # Update the icon to match
             if is_tts_enabled:
-                self.tts_icon_button.setIcon(QIcon("frontend/icons/sound_on.svg"))
+                self.tts_icon_button.setIcon(get_icon('sound_on'))
                 self.tts_icon_button.setToolTip("Text-to-Speech: On (click to disable)")
             else:
-                self.tts_icon_button.setIcon(QIcon("frontend/icons/sound_off.svg"))
+                self.tts_icon_button.setIcon(get_icon('sound_off'))
                 self.tts_icon_button.setToolTip("Text-to-Speech: Off (click to enable)")
     
     def showEvent(self, event):

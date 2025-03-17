@@ -3,7 +3,6 @@ import sys
 import asyncio
 from PyQt6.QtWidgets import QWidget, QVBoxLayout
 from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QIcon
 
 from frontend.config import logger
 from frontend.style import DARK_COLORS, LIGHT_COLORS, generate_main_stylesheet
@@ -71,31 +70,6 @@ class ChatWindow(BaseWindow):
         # Connect STT text signals
         self.controller.interim_stt_text_received.connect(self.handle_interim_stt_text)
         self.controller.final_stt_text_received.connect(self.handle_final_stt_text)
-        
-        # Connect theme changed signal from base window
-        self.theme_changed.connect(self.handle_theme_changed)
-    
-    def handle_theme_changed(self, is_dark_mode):
-        """Handle theme changes from the base window"""
-        self.top_buttons.update_icons(is_dark_mode)
-        self.chat_area.update_colors(self.colors)
-        self.input_area.update_colors(self.colors)
-    
-    def clear_chat(self):
-        """Clear the chat area"""
-        self.chat_area.clear()
-        self.controller.clear_chat_history()
-    
-    def send_message(self):
-        """Send a message to the controller"""
-        message = self.input_area.get_text()
-        if message.strip():
-            # Add user message to chat area
-            self.chat_area.add_message(message, is_user=True)
-            # Process message with controller
-            self.controller.send_message(message)
-            # Clear input area
-            self.input_area.clear_text()
     
     def handle_interim_stt_text(self, text):
         """Handle interim STT text from speech recognition"""
@@ -132,25 +106,23 @@ class ChatWindow(BaseWindow):
         self.controller.cleanup()
         super().closeEvent(event)
 
-    def toggle_kiosk_mode(self):
-        """Override toggle_kiosk_mode to handle input area visibility"""
-        # Call the parent class method first to handle the base functionality
-        super().toggle_kiosk_mode()
-        
-        # Update input area visibility based on kiosk mode
-        if hasattr(self, 'input_area'):
-            self.input_area.setVisible(not self.is_kiosk_mode)
-            logger.info(f"ChatWindow: Input area visibility set to {not self.is_kiosk_mode}")
-            
     def showEvent(self, event):
-        """Handle show event - ensure fullscreen if in kiosk mode"""
-        # If in kiosk mode, make sure we're properly in fullscreen
-        if self.is_kiosk_mode:
-            logger.info("ChatWindow: Ensuring fullscreen in kiosk mode")
-            self.showFullScreen()
-            
-            # Also ensure input area is hidden in kiosk mode
-            if hasattr(self, 'input_area'):
-                self.input_area.setVisible(not self.is_kiosk_mode)
-                
+        """Handle show event"""
+        # Call super().showEvent to handle the kiosk mode and component updates
         super().showEvent(event)
+
+    def clear_chat(self):
+        """Clear the chat area"""
+        self.chat_area.clear()
+        self.controller.clear_chat_history()
+    
+    def send_message(self):
+        """Send a message to the controller"""
+        message = self.input_area.get_text()
+        if message.strip():
+            # Add user message to chat area
+            self.chat_area.add_message(message, is_user=True)
+            # Process message with controller
+            self.controller.send_message(message)
+            # Clear input area
+            self.input_area.clear_text()

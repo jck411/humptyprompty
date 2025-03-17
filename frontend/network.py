@@ -254,9 +254,15 @@ class AsyncWebSocketClient(QObject):
     
     def _cancel_all_pending_tasks(self):
         """Cancel all pending tasks."""
-        for task in self._pending_tasks:
+        cancelled_count = 0
+        for task in list(self._pending_tasks):  # Create a copy of the set before iterating
             if not task.done():
+                logger.debug(f"Cancelling task: {task}")
                 task.cancel()
+                cancelled_count += 1
+        
+        if cancelled_count > 0:
+            logger.info(f"Cancelled {cancelled_count} pending tasks")
         
     async def _close_websocket(self):
         """Safely close the WebSocket connection"""
@@ -271,6 +277,8 @@ class AsyncWebSocketClient(QObject):
     def cleanup(self):
         """Clean up resources and close connections"""
         logger.info("Cleaning up AsyncWebSocketClient")
+        
+        # Mark as not running to prevent new operations
         self.running = False
         
         # Store current websocket reference and clear it immediately to prevent new operations
@@ -294,12 +302,12 @@ class AsyncWebSocketClient(QObject):
                         )
                         
                         # Create a Future that will be completed when the close task is done
-                        # This ensures the task is properly tracked by the event loop
                         future = asyncio.run_coroutine_threadsafe(self._wait_for_task_completion(close_task), loop)
                         
                         # Wait with a timeout to ensure we don't block indefinitely
                         try:
-                            future.result(timeout=2.0)  # 2 seconds should be enough for a WebSocket to close
+                            # Use 3 seconds timeout to give more time for graceful shutdown
+                            future.result(timeout=3.0)
                         except (asyncio.TimeoutError, concurrent.futures.TimeoutError):
                             logger.warning("WebSocket close operation timed out, but continuing shutdown")
                         except Exception as e:
@@ -315,6 +323,23 @@ class AsyncWebSocketClient(QObject):
                     loop.close()
             except Exception as e:
                 logger.error(f"Error during WebSocket cleanup: {e}")
+        
+        # Wait a brief moment to allow any in-progress operations to complete
+        try:
+            if asyncio.get_event_loop().is_running():
+                # Create a wait task and wait for it with timeout
+                sleep_task = self._register_task(asyncio.create_task(asyncio.sleep(0.5)))
+                try:
+                    # Run in current event loop if it's running
+                    loop = asyncio.get_event_loop()
+                    future = asyncio.run_coroutine_threadsafe(self._wait_for_task_completion(sleep_task), loop)
+                    future.result(timeout=0.6)  # Slightly longer than the sleep
+                except Exception:
+                    # If we can't wait properly, it's acceptable to continue
+                    pass
+        except Exception:
+            # Ignore any errors in this sleep phase - it's just a best effort
+            pass
             
         # Cancel any remaining pending tasks
         self._cancel_all_pending_tasks()

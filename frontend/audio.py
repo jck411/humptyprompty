@@ -86,6 +86,39 @@ class QueueAudioDevice(QIODevice):
             self.audio_buffer.clear()
             self.end_of_stream = True
 
+    def handle_audio_state(self, action):
+        """Centralized method to handle audio state transitions"""
+        if action == 'enable':
+            if not self.is_active:
+                self.open(QIODevice.ReadWrite)
+                self.is_active = True
+                logger.info("Audio device enabled")
+        elif action == 'disable':
+            if self.is_active:
+                self.close()
+                self.is_active = False
+                logger.info("Audio device disabled")
+        elif action == 'pause':
+            if self.is_active:
+                self.pause()
+                logger.info("Audio device paused")
+        elif action == 'resume':
+            if self.is_active:
+                self.resume()
+                logger.info("Audio device resumed")
+
+    def enable(self):
+        self.handle_audio_state('enable')
+
+    def disable(self):
+        self.handle_audio_state('disable')
+
+    def pause(self):
+        self.handle_audio_state('pause')
+
+    def resume(self):
+        self.handle_audio_state('resume')
+
 # -----------------------------------------------------------------------------
 #                             AUDIO MANAGER CLASS
 # -----------------------------------------------------------------------------

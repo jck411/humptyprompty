@@ -35,7 +35,15 @@ if __name__ == '__main__':
         logger.info("Keyboard interrupt received, shutting down...")
     finally:
         logger.info("Cleaning up before exit")
-        window_manager.cleanup()
+        try:
+            # Need to create a new task and run it to completion
+            cleanup_task = asyncio.ensure_future(window_manager.cleanup())
+            loop.run_until_complete(cleanup_task)
+        except Exception as e:
+            logger.error(f"Error during window manager cleanup: {e}")
+            
+        # After window_manager cleanup, check for any remaining tasks
         pending = asyncio.all_tasks(loop)
         for task in pending:
-            task.cancel()
+            if not task.done():
+                task.cancel()

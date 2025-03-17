@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import asyncio
 from PyQt6.QtCore import QObject, QTimer, pyqtSignal, pyqtSlot, Qt
-from typing import List, Dict, Type, Optional
+from typing import List, Dict, Type, Optional, Set
 
 from frontend.base_window import BaseWindow
 from frontend.clock_window import ClockWindow
@@ -30,6 +30,10 @@ class WindowManager(QObject):
             # "photos": PhotoWindow,
         }
         
+        # Register window classes in BaseWindow.WINDOW_CLASSES dictionary
+        for window_type, window_class in self.window_types.items():
+            BaseWindow.register_window_class(window_type, window_class)
+        
         # Window display names
         self.window_display_names: Dict[str, str] = {
             "clock": "Clock",
@@ -56,6 +60,9 @@ class WindowManager(QObject):
         # Initialize rotation timer
         self.rotation_timer = QTimer(self)
         self.rotation_timer.timeout.connect(self.rotate_to_next_window)
+        
+        # Task tracking
+        self._pending_tasks: Set[asyncio.Task] = set()
         
     def initialize(self):
         """Initialize the window manager and show the first window"""
@@ -135,15 +142,8 @@ class WindowManager(QObject):
             # Apply kiosk mode UI changes
             window.setWindowFlags(Qt.WindowType.FramelessWindowHint)
             
-            # Update top buttons if they exist
-            if hasattr(window, 'top_buttons'):
-                logger.info(f"Updating top buttons for {window_name} to kiosk mode")
-                window.top_buttons.set_kiosk_mode(True)
-                
-            # Hide input area if this is a ChatWindow
-            if window_name == "chat" and hasattr(window, 'input_area'):
-                logger.info(f"Hiding input area for {window_name} in kiosk mode")
-                window.input_area.setVisible(False)
+            # Use the new method to update all components consistently
+            window._update_kiosk_mode_in_components()
         
         # Update current window references before showing the new window
         self.current_window_name = window_name
@@ -253,8 +253,12 @@ class WindowManager(QObject):
                 window.is_dark_mode = is_dark_mode
                 window.colors = DARK_COLORS if is_dark_mode else LIGHT_COLORS
                 window.apply_styling()
-                # Call handle_theme_changed if it exists
-                if hasattr(window, 'handle_theme_changed'):
+                
+                # Update components using the new centralized method
+                if hasattr(window, '_update_theme_in_components'):
+                    window._update_theme_in_components()
+                # Fallback to legacy method if it exists (for backward compatibility)
+                elif hasattr(window, 'handle_theme_changed'):
                     window.handle_theme_changed(is_dark_mode)
     
     @pyqtSlot()
@@ -295,12 +299,96 @@ class WindowManager(QObject):
         else:
             self.rotation_timer.stop()
     
-    def cleanup(self):
+    def _register_task(self, task):
+        """Add a task to the pending tasks set and set up its cleanup callback."""
+        self._pending_tasks.add(task)
+        task.add_done_callback(self._remove_task)
+        return task
+    
+    def _remove_task(self, task):
+        """Remove a completed task from the pending tasks set."""
+        self._pending_tasks.discard(task)
+    
+    def _cancel_pending_tasks(self):
+        """Cancel all pending tasks created by this manager."""
+        for task in list(self._pending_tasks):
+            if not task.done():
+                logger.info(f"Cancelling pending task: {task}")
+                task.cancel()
+                
+    async def _await_task_with_timeout(self, coro, timeout=2.0):
+        """Run a coroutine as a task with timeout and exception handling."""
+        task = self._register_task(asyncio.create_task(coro))
+        try:
+            return await asyncio.wait_for(task, timeout=timeout)
+        except asyncio.TimeoutError:
+            logger.warning(f"Task timed out after {timeout}s: {coro.__qualname__}")
+            return None
+        except asyncio.CancelledError:
+            logger.debug(f"Task was cancelled: {coro.__qualname__}")
+            return None
+        except Exception as e:
+            logger.error(f"Task failed with exception: {e}")
+            return None
+    
+    async def cleanup(self):
         """Clean up resources before shutdown"""
         logger.info("Cleaning up WindowManager")
         self.rotation_timer.stop()
         
-        # Close all windows
-        for name, window in self.windows.items():
+        # Get list of all windows to clean up (make a copy to avoid modification during iteration)
+        windows_to_cleanup = list(self.windows.items())
+        
+        # Track all cleanup tasks
+        cleanup_tasks = []
+        
+        # Close and clean up all windows
+        for name, window in windows_to_cleanup:
+            logger.info(f"Cleaning up window: {name}")
+            
+            # Special handling for ChatWindow
+            if name == "chat" and hasattr(window, "controller"):
+                logger.info("Cleaning up chat controller")
+                
+                # Handle async cleanup with proper task awaiting
+                try:
+                    if hasattr(window.controller, "cleanup"):
+                        if asyncio.iscoroutinefunction(window.controller.cleanup):
+                            # Await it with timeout if it's an async function
+                            cleanup_task = self._register_task(
+                                asyncio.create_task(window.controller.cleanup())
+                            )
+                            cleanup_tasks.append(cleanup_task)
+                        else:
+                            # Call directly if it's synchronous
+                            window.controller.cleanup()
+                except Exception as e:
+                    logger.error(f"Error during controller cleanup: {e}")
+            
+            # Close the window
             logger.info(f"Closing window: {name}")
-            window.close() 
+            window.close()
+        
+        # Wait for all cleanup tasks to finish with a reasonable timeout
+        if cleanup_tasks:
+            logger.info(f"Waiting for {len(cleanup_tasks)} cleanup tasks to complete")
+            try:
+                done, pending = await asyncio.wait(
+                    cleanup_tasks, 
+                    timeout=2.0,  # 2 seconds max wait time
+                    return_when=asyncio.ALL_COMPLETED
+                )
+                
+                # Log any pending tasks
+                if pending:
+                    logger.warning(f"{len(pending)} cleanup tasks did not complete within timeout")
+            except Exception as e:
+                logger.error(f"Error waiting for cleanup tasks: {e}")
+        
+        # Allow any final async operations to complete
+        await asyncio.sleep(0.2)
+        
+        # Cancel our own pending tasks (not all tasks in the event loop)
+        self._cancel_pending_tasks()
+            
+        logger.info("WindowManager cleanup complete") 

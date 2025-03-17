@@ -68,11 +68,6 @@ class ClockWindow(BaseWindow):
         # Add clock container to content layout
         self.content_layout.addWidget(clock_container, 1)  # Add with stretch
     
-    def handle_theme_changed(self, is_dark_mode):
-        """Handle theme changes"""
-        if hasattr(self, 'top_buttons'):
-            self.top_buttons.update_icons(is_dark_mode)
-    
     @pyqtSlot()
     def update_time(self):
         """Update the time and date labels with current time"""
@@ -101,3 +96,14 @@ class ClockWindow(BaseWindow):
         """Handle hide event - stop timer when window becomes hidden"""
         self.timer.stop()
         super().hideEvent(event) 
+        
+    def closeEvent(self, event):
+        """Handle close event - perform necessary cleanup"""
+        # Stop the timer to prevent updates after closing
+        if hasattr(self, 'timer'):
+            self.timer.stop()
+            
+        logger.info("ClockWindow: Closing clock window")
+        
+        # Pass the event to the parent class
+        super().closeEvent(event) 
