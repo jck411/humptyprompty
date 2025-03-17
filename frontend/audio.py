@@ -85,37 +85,15 @@ class QueueAudioDevice(QIODevice):
             self.end_of_stream = True
 
     def handle_audio_state(self, action):
-        """Centralized method to handle audio state transitions"""
-        if action == 'enable':
-            if not self.is_active:
-                self.open(QIODevice.ReadWrite)
-                self.is_active = True
-                logger.info("Audio device enabled")
-        elif action == 'disable':
-            if self.is_active:
-                self.close()
-                self.is_active = False
-                logger.info("Audio device disabled")
-        elif action == 'pause':
-            if self.is_active:
-                self.pause()
-                logger.info("Audio device paused")
-        elif action == 'resume':
-            if self.is_active:
-                self.resume()
-                logger.info("Audio device resumed")
-
-    def enable(self):
-        self.handle_audio_state('enable')
-
-    def disable(self):
-        self.handle_audio_state('disable')
-
-    def pause(self):
-        self.handle_audio_state('pause')
-
-    def resume(self):
-        self.handle_audio_state('resume')
+        """Centralized method to handle audio device state transitions"""
+        if action == 'enable' and not self.is_active:
+            self.open(QIODevice.ReadWrite)
+            self.is_active = True
+            logger.info("Audio device enabled")
+        elif action == 'disable' and self.is_active:
+            self.close()
+            self.is_active = False
+            logger.info("Audio device disabled")
 
 # -----------------------------------------------------------------------------
 #                             AUDIO MANAGER CLASS
@@ -210,22 +188,21 @@ class AudioManager(QObject):
         logger.info(f"Received audio chunk of size: {len(pcm_data)} bytes")
         
         # Handle empty audio message (end of stream)
-        if pcm_data == b'audio:' or len(pcm_data) == 0:
+        if not pcm_data or pcm_data == b'audio:':
             logger.info("Received empty audio message, marking end-of-stream")
             self.audio_queue.put_nowait(None)
             self.audio_device.mark_end_of_stream()
             
-            # Resume STT only after TTS audio has finished playing
+            # Resume STT after TTS audio
             if stt_handler and self.tts_audio_playing:
                 asyncio.create_task(self.resume_stt_after_tts(stt_handler))
             self.tts_audio_playing = False
         else:
-            # If this is the first audio chunk of TTS playback, pause STT
-            if not self.tts_audio_playing:
+            # If this is the first audio chunk, pause STT
+            if not self.tts_audio_playing and stt_handler:
                 self.tts_audio_playing = True
-                if stt_handler:
-                    logger.info("Pausing STT using KeepAlive mechanism due to TTS audio starting")
-                    stt_handler.set_paused(True)
+                logger.info("Pausing STT due to TTS audio starting")
+                stt_handler.set_paused(True)
                     
             # Process the audio data
             prefix = b'audio:'
@@ -245,7 +222,6 @@ class AudioManager(QObject):
             await asyncio.sleep(0.2)
             
             # Reset the activity timer before resuming STT to ensure a fresh timeout period
-            # This is done by directly updating the last_activity_time
             stt_handler.last_activity_time = time.time()
             logger.info(f"Reset STT activity timer before unpausing (timeout in {stt_handler.keepalive_timeout} seconds)")
             
@@ -255,38 +231,30 @@ class AudioManager(QObject):
     async def stop_audio(self):
         """Stop audio playback and clear buffers"""
         logger.info("Stopping audio playback")
-        current_state = self.audio_sink.state()
-        logger.info(f"Audio sink state before stopping: {current_state}")
         
-        # Reset state flags first to ensure UI updates properly
+        # Reset state flag and stop audio sink
         self.tts_audio_playing = False
+        self.audio_sink.stop()
+        self.audio_state_changed.emit(QAudio.State.StoppedState)
         
-        # Stop audio sink if it's active
-        if current_state == QAudio.State.ActiveState:
-            logger.info("Audio sink is active; stopping it")
-            self.audio_sink.stop()
-            # Force emit state change for UI updates
-            self.audio_state_changed.emit(QAudio.State.StoppedState)
-            logger.info("Audio sink stopped and state change emitted")
-        else:
-            logger.info(f"Audio sink not active; current state: {current_state}")
-            # Still force a state update to ensure UI responds
-            self.audio_state_changed.emit(current_state)
-
-        # Clear device buffer efficiently
+        # Clear device buffer and audio queue
         await asyncio.to_thread(self.audio_device.clear_and_mark_end)
         
-        # Clear the audio queue efficiently using a direct approach
+        # Clear the audio queue efficiently
+        self._clear_audio_queue()
+        
+        # Add end-of-stream marker
+        self.audio_queue.put_nowait(None)
+        logger.info("Audio resources cleaned up")
+    
+    def _clear_audio_queue(self):
+        """Helper method to clear the audio queue"""
         try:
             while True:
                 self.audio_queue.get_nowait()
                 self.audio_queue.task_done()
         except asyncio.QueueEmpty:
             pass
-        
-        # Add end-of-stream marker
-        self.audio_queue.put_nowait(None)
-        logger.info("End-of-stream marker placed in audio queue; audio resources cleaned up")
     
     def get_audio_state(self):
         """Get the current state of the audio buffer and end-of-stream flag"""
@@ -302,27 +270,18 @@ class AudioManager(QObject):
             self.audio_consumer_task.cancel()
             logger.debug("Audio consumer task cancelled")
         
-        # Stop the audio sink if it exists
+        # Stop the audio sink and clean up device
         if self.audio_sink:
             self.audio_sink.stop()
             logger.debug("Audio sink stopped")
         
-        # Close and reset the audio device
         if self.audio_device:
-            # Clear any remaining data in the buffer
             self.audio_device.clear_buffer()
             self.audio_device.close()
             logger.debug("Audio device closed and buffer cleared")
             
-        # Reset state flags
+        # Reset state flag and clear queue
         self.tts_audio_playing = False
-        
-        # Clear the audio queue completely
-        try:
-            while True:
-                self.audio_queue.get_nowait()
-                self.audio_queue.task_done()
-        except asyncio.QueueEmpty:
-            pass
+        self._clear_audio_queue()
         
         logger.info("Audio resources fully cleaned up and released") 
