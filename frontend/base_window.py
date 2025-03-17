@@ -30,6 +30,9 @@ class BaseWindow(QMainWindow, Themeable):
         self.setWindowTitle(title)
         self.setMinimumSize(800, 600)
         
+        # Set window attributes to optimize transitions
+        self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, True)
+        
         # Initialize state
         self.is_dark_mode = True
         self.colors = DARK_COLORS
@@ -295,7 +298,7 @@ class BaseWindow(QMainWindow, Themeable):
             return False
     
     def showEvent(self, event):
-        """Handle window show event - ensure proper fullscreen state"""
+        """Handle window show events"""
         # If in kiosk mode, ensure the window is in fullscreen
         if self.is_kiosk_mode:
             logger.info(f"{self.__class__.__name__}: Ensuring fullscreen in kiosk mode")
@@ -306,6 +309,9 @@ class BaseWindow(QMainWindow, Themeable):
             self._update_kiosk_mode_in_components()
             
         super().showEvent(event)
+        
+        # Log window visibility
+        logger.debug(f"Window {self.__class__.__name__} shown")
     
     def closeEvent(self, event):
         """Handle window close event"""

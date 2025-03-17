@@ -151,7 +151,7 @@ class WindowManager(QObject):
             # Apply kiosk mode UI changes
             window.setWindowFlags(Qt.WindowType.FramelessWindowHint)
             
-            # Use the new method to update all components consistently
+            # Use the method to update all components consistently
             window._update_kiosk_mode_in_components()
         
         # Make sure theme is up to date before showing the window
@@ -177,11 +177,13 @@ class WindowManager(QObject):
         if previous_window:
             # Initialize window with 0 opacity to prepare for fade-in
             window.setWindowOpacity(0.0)
-            window.setVisible(True)
-            window.raise_()  # Place it above the current window
             
-            # Start the cross-fade transition
-            QTimer.singleShot(10, lambda: self._start_fade_transition(window, previous_window))
+            # Show the window first (but invisible due to opacity=0)
+            window.show()
+            window.raise_()  # Ensure it's above other windows
+            
+            # Start the cross-fade transition immediately
+            self._start_fade_transition(window, previous_window)
         else:
             # If there's no previous window, just show the new one immediately
             window.show()
@@ -202,39 +204,39 @@ class WindowManager(QObject):
         # Update last used time for the window (using timestamp in milliseconds)
         self.window_last_used[window_name] = int(time.time() * 1000)
     
-    def _start_fade_transition(self, new_window, previous_window):
+    def _start_fade_transition(self, new_window, previous_window, original_flags=None):
         """Start a fade transition between windows"""
-        # Activate the new window
-        new_window.activateWindow()
-        
         # If window should be in kiosk mode, make sure it's in full screen
         if new_window.is_kiosk_mode:
             logger.info(f"Ensuring {new_window.objectName() or 'window'} is in full screen")
             new_window.showFullScreen()
-            
+        
+        # Activate the new window to ensure it has focus
+        new_window.activateWindow()
+        
         # Use QPropertyAnimation for smoother fade transitions
-        fade_duration = 150  # milliseconds
+        fade_duration = 300  # milliseconds - longer for smoother transition
         
         # Create animations for both windows
         self.fade_in_animation = QPropertyAnimation(new_window, b"windowOpacity")
         self.fade_in_animation.setDuration(fade_duration)
         self.fade_in_animation.setStartValue(0.0)
         self.fade_in_animation.setEndValue(1.0)
-        self.fade_in_animation.setEasingCurve(QEasingCurve.Type.InOutQuad)
+        self.fade_in_animation.setEasingCurve(QEasingCurve.Type.InOutCubic)
         
         self.fade_out_animation = QPropertyAnimation(previous_window, b"windowOpacity")
         self.fade_out_animation.setDuration(fade_duration)
         self.fade_out_animation.setStartValue(1.0)
         self.fade_out_animation.setEndValue(0.0)
-        self.fade_out_animation.setEasingCurve(QEasingCurve.Type.InOutQuad)
+        self.fade_out_animation.setEasingCurve(QEasingCurve.Type.InOutCubic)
         
-        # Connect to animation finished signal
+        # Connect to animation finished signals
         self.fade_out_animation.finished.connect(lambda: self._finalize_transition(previous_window))
         
         # Start both animations
         self.fade_in_animation.start()
         self.fade_out_animation.start()
-        
+    
     def _finalize_transition(self, window):
         """Finalize the transition by hiding the window after it's already invisible"""
         # Hide the window now that it's invisible (opacity 0)
