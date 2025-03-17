@@ -65,17 +65,36 @@ QLabel {
     font-size: 14px;
 }
 
+/* 
+ * BUTTON STYLING - UPDATED TO USE DYNAMIC PROPERTIES
+ * Now using the same property names as in the code and dark.qss
+ */
+
+/* STT Button styling */
+QPushButton#sttButton {
+    border-radius: 10px;
+}
+
 QPushButton#sttButton[isEnabled="true"][isListening="false"] {
     background-color: green !important;
     color: white !important;
     border: none;
-    border-radius: 10px;
 }
 
 QPushButton#sttButton[isListening="true"] {
     background-color: red !important;
     color: white !important;
     border: none;
+}
+
+QPushButton#sttButton[isEnabled="false"] {
+    background-color: #0D8BD9 !important;
+    color: white !important;
+    border: none;
+}
+
+/* Auto Send Button styling */
+QPushButton#autoSendButton {
     border-radius: 10px;
 }
 
@@ -83,6 +102,16 @@ QPushButton#autoSendButton[isAutoSend="true"] {
     background-color: green !important;
     color: white !important;
     border: none;
+}
+
+QPushButton#autoSendButton[isAutoSend="false"] {
+    background-color: #0D8BD9 !important;
+    color: white !important;
+    border: none;
+}
+
+/* TTS Button styling */
+QPushButton#ttsButton {
     border-radius: 10px;
 }
 
@@ -90,7 +119,12 @@ QPushButton#ttsButton[isTtsEnabled="true"] {
     background-color: green !important;
     color: white !important;
     border: none;
-    border-radius: 10px;
+}
+
+QPushButton#ttsButton[isTtsEnabled="false"] {
+    background-color: #0D8BD9 !important;
+    color: white !important;
+    border: none;
 }
 
 /* User message bubble styles */
