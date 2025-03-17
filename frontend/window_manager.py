@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import asyncio
-from PyQt6.QtCore import QObject, QTimer, pyqtSignal, pyqtSlot, Qt
+import time
+from PyQt6.QtCore import QObject, QTimer, pyqtSignal, pyqtSlot, Qt, QPropertyAnimation, QEasingCurve
 from typing import List, Dict, Type, Optional, Set
 
 from frontend.base_window import BaseWindow
@@ -65,6 +66,14 @@ class WindowManager(QObject):
         # Task tracking
         self._pending_tasks: Set[asyncio.Task] = set()
         
+        # Window memory management
+        self.memory_optimization_enabled = False
+        self.inactive_window_timeout = 300000  # 5 minutes
+        self.window_last_used = {}  # Track when each window was last used
+        self.window_unload_timer = QTimer(self)
+        self.window_unload_timer.timeout.connect(self.check_for_windows_to_unload)
+        self.window_unload_timer.start(60000)  # Check every minute
+        
     def initialize(self):
         """Initialize the window manager and show the first window"""
         logger.info("Initializing WindowManager")
@@ -76,9 +85,8 @@ class WindowManager(QObject):
         self.rotation_enabled = False
         logger.info("Window rotation is disabled by default")
         
-        # Start the rotation timer if enabled (but only for kiosk mode)
-        if self.rotation_enabled:
-            self.rotation_timer.start(self.rotation_interval)
+        # We'll only start the rotation timer when it's explicitly enabled
+        # This avoids wasting resources with a timer that fires but does nothing
     
     def get_window(self, window_name: str) -> BaseWindow:
         """Get or create a window instance by name"""
@@ -146,6 +154,11 @@ class WindowManager(QObject):
             # Use the new method to update all components consistently
             window._update_kiosk_mode_in_components()
         
+        # Make sure theme is up to date before showing the window
+        if hasattr(self, 'current_theme_is_dark'):
+            if window.is_dark_mode != self.current_theme_is_dark:
+                self._apply_theme_to_window(window, self.current_theme_is_dark)
+        
         # Update current window references before showing the new window
         self.current_window_name = window_name
         self.current_window = window
@@ -186,6 +199,9 @@ class WindowManager(QObject):
         self.window_changed.emit(window_name)
         logger.info(f"Changed active window to: {window_name}")
         
+        # Update last used time for the window (using timestamp in milliseconds)
+        self.window_last_used[window_name] = int(time.time() * 1000)
+    
     def _start_fade_transition(self, new_window, previous_window):
         """Start a fade transition between windows"""
         # Activate the new window
@@ -196,31 +212,28 @@ class WindowManager(QObject):
             logger.info(f"Ensuring {new_window.objectName() or 'window'} is in full screen")
             new_window.showFullScreen()
             
-        # Create a smooth cross-fade effect
-        fade_duration = 150  # milliseconds, adjust for desired speed
-        fade_steps = 10
+        # Use QPropertyAnimation for smoother fade transitions
+        fade_duration = 150  # milliseconds
         
-        # Start the fade-in/fade-out process
-        self._fade_windows(new_window, previous_window, 0, fade_steps, fade_duration // fade_steps)
+        # Create animations for both windows
+        self.fade_in_animation = QPropertyAnimation(new_window, b"windowOpacity")
+        self.fade_in_animation.setDuration(fade_duration)
+        self.fade_in_animation.setStartValue(0.0)
+        self.fade_in_animation.setEndValue(1.0)
+        self.fade_in_animation.setEasingCurve(QEasingCurve.Type.InOutQuad)
         
-    def _fade_windows(self, new_window, previous_window, step, total_steps, step_duration):
-        """Perform one step of the cross-fade animation"""
-        if step > total_steps:
-            # Animation complete, finalize the transition
-            self._finalize_transition(previous_window)
-            return
-            
-        # Calculate opacity for this step
-        new_opacity = step / total_steps
-        prev_opacity = 1.0 - new_opacity
+        self.fade_out_animation = QPropertyAnimation(previous_window, b"windowOpacity")
+        self.fade_out_animation.setDuration(fade_duration)
+        self.fade_out_animation.setStartValue(1.0)
+        self.fade_out_animation.setEndValue(0.0)
+        self.fade_out_animation.setEasingCurve(QEasingCurve.Type.InOutQuad)
         
-        # Set opacity on both windows
-        new_window.setWindowOpacity(new_opacity)
-        previous_window.setWindowOpacity(prev_opacity)
+        # Connect to animation finished signal
+        self.fade_out_animation.finished.connect(lambda: self._finalize_transition(previous_window))
         
-        # Schedule next step
-        QTimer.singleShot(step_duration, 
-                         lambda: self._fade_windows(new_window, previous_window, step + 1, total_steps, step_duration))
+        # Start both animations
+        self.fade_in_animation.start()
+        self.fade_out_animation.start()
         
     def _finalize_transition(self, window):
         """Finalize the transition by hiding the window after it's already invisible"""
@@ -229,11 +242,10 @@ class WindowManager(QObject):
         # Reset opacity for future use
         window.setWindowOpacity(1.0)
     
-    @pyqtSlot()
     def rotate_to_next_window(self):
         """Rotate to the next window in the rotation order"""
-        # Only rotate if current window is in kiosk mode
-        if not self.current_window or not self.current_window.is_kiosk_mode:
+        # Only rotate if rotation is enabled and current window is in kiosk mode
+        if not self.rotation_enabled or not self.current_window or not self.current_window.is_kiosk_mode:
             return
             
         if not self.rotation_order:
@@ -249,20 +261,34 @@ class WindowManager(QObject):
     @pyqtSlot(bool)
     def handle_theme_changed(self, is_dark_mode: bool):
         """Propagate theme changes to all windows"""
+        # Store the current theme state so we can apply it to windows when they become visible
+        self.current_theme_is_dark = is_dark_mode
+        
+        # Only update visible windows immediately
         for window in self.windows.values():
-            if window.is_dark_mode != is_dark_mode:
+            if window.isVisible():
+                self._apply_theme_to_window(window, is_dark_mode)
+            else:
+                # For hidden windows, just store the theme state
+                # Theme will be applied when the window becomes visible
                 window.is_dark_mode = is_dark_mode
                 window.colors = DARK_COLORS if is_dark_mode else LIGHT_COLORS
-                window.apply_styling()
                 
-                # If the window is a Themeable, use the update_theme method
-                if isinstance(window, Themeable):
-                    window.update_theme(is_dark_mode, window.colors)
-                # Fallback to legacy methods for backward compatibility
-                elif hasattr(window, '_update_theme_in_components'):
-                    window._update_theme_in_components()
-                elif hasattr(window, 'handle_theme_changed'):
-                    window.handle_theme_changed(is_dark_mode)
+    def _apply_theme_to_window(self, window, is_dark_mode):
+        """Apply theme changes to a specific window"""
+        if window.is_dark_mode != is_dark_mode:
+            window.is_dark_mode = is_dark_mode
+            window.colors = DARK_COLORS if is_dark_mode else LIGHT_COLORS
+            window.apply_styling()
+            
+            # If the window is a Themeable, use the update_theme method
+            if isinstance(window, Themeable):
+                window.update_theme(is_dark_mode, window.colors)
+            # Fallback to legacy methods for backward compatibility
+            elif hasattr(window, '_update_theme_in_components'):
+                window._update_theme_in_components()
+            elif hasattr(window, 'handle_theme_changed'):
+                window.handle_theme_changed(is_dark_mode)
     
     @pyqtSlot()
     def handle_window_closed(self):
@@ -298,9 +324,15 @@ class WindowManager(QObject):
             self.rotation_enabled = enabled
             
         if self.rotation_enabled:
-            self.rotation_timer.start(self.rotation_interval)
+            # Only start the timer if not already active
+            if not self.rotation_timer.isActive():
+                self.rotation_timer.start(self.rotation_interval)
+                logger.info(f"Started rotation timer with interval {self.rotation_interval}ms")
         else:
-            self.rotation_timer.stop()
+            # Only stop the timer if it's active
+            if self.rotation_timer.isActive():
+                self.rotation_timer.stop()
+                logger.info("Stopped rotation timer")
     
     def _register_task(self, task):
         """Add a task to the pending tasks set and set up its cleanup callback."""
@@ -334,10 +366,68 @@ class WindowManager(QObject):
             logger.error(f"Task failed with exception: {e}")
             return None
     
+    def check_for_windows_to_unload(self):
+        """Check for windows that have been inactive for a while and unload them to free memory"""
+        if not self.memory_optimization_enabled:
+            return
+            
+        # Get current time in milliseconds
+        current_time = int(time.time() * 1000)
+        windows_to_unload = []
+        
+        for window_name, window in self.windows.items():
+            # Never unload the current window
+            if window_name == self.current_window_name:
+                continue
+                
+            # Skip windows that are visible
+            if window.isVisible():
+                continue
+                
+            # Check if the window has been inactive for long enough
+            last_used = self.window_last_used.get(window_name, 0)
+            if current_time - last_used > self.inactive_window_timeout:
+                windows_to_unload.append(window_name)
+        
+        # Unload the windows
+        for window_name in windows_to_unload:
+            self.unload_window(window_name)
+    
+    def unload_window(self, window_name):
+        """Unload a window to free memory"""
+        if window_name not in self.windows:
+            return
+            
+        logger.info(f"Unloading inactive window: {window_name}")
+        
+        # Get the window object
+        window = self.windows[window_name]
+        
+        # Remove it from our tracking dictionaries
+        del self.windows[window_name]
+        if window_name in self.window_last_used:
+            del self.window_last_used[window_name]
+            
+        # Clean up the window
+        window.deleteLater()
+    
+    def set_memory_optimization(self, enabled, timeout_ms=None):
+        """Enable or disable memory optimization by unloading inactive windows"""
+        self.memory_optimization_enabled = enabled
+        
+        if timeout_ms is not None:
+            self.inactive_window_timeout = max(timeout_ms, 60000)  # Minimum 1 minute
+            
+        logger.info(f"Memory optimization {'enabled' if enabled else 'disabled'} " 
+                   f"with timeout {self.inactive_window_timeout}ms")
+
     async def cleanup(self):
         """Clean up resources before shutdown"""
         logger.info("Cleaning up WindowManager")
+        
+        # Stop timers
         self.rotation_timer.stop()
+        self.window_unload_timer.stop()
         
         # Get list of all windows to clean up (make a copy to avoid modification during iteration)
         windows_to_cleanup = list(self.windows.items())
@@ -349,7 +439,7 @@ class WindowManager(QObject):
         for name, window in windows_to_cleanup:
             logger.info(f"Cleaning up window: {name}")
             
-            # Special handling for ChatWindow
+            # Special handling for ChatWindow - run cleanup tasks concurrently
             if name == "chat" and hasattr(window, "controller"):
                 logger.info("Cleaning up chat controller")
                 
@@ -357,7 +447,7 @@ class WindowManager(QObject):
                 try:
                     if hasattr(window.controller, "cleanup"):
                         if asyncio.iscoroutinefunction(window.controller.cleanup):
-                            # Await it with timeout if it's an async function
+                            # Create the task and add it to our cleanup tasks, but don't await yet
                             cleanup_task = self._register_task(
                                 asyncio.create_task(window.controller.cleanup())
                             )
@@ -372,24 +462,20 @@ class WindowManager(QObject):
             logger.info(f"Closing window: {name}")
             window.close()
         
-        # Wait for all cleanup tasks to finish with a reasonable timeout
+        # Wait for all cleanup tasks to finish with a timeout, but gather them for concurrent execution
         if cleanup_tasks:
             logger.info(f"Waiting for {len(cleanup_tasks)} cleanup tasks to complete")
             try:
-                done, pending = await asyncio.wait(
-                    cleanup_tasks, 
-                    timeout=2.0,  # 2 seconds max wait time
-                    return_when=asyncio.ALL_COMPLETED
+                # Use asyncio.gather with return_exceptions=True to prevent exceptions from stopping
+                # all tasks, but with a timeout to avoid waiting indefinitely
+                await asyncio.wait_for(
+                    asyncio.gather(*cleanup_tasks, return_exceptions=True),
+                    timeout=2.0  # 2 seconds max wait time
                 )
-                
-                # Log any pending tasks
-                if pending:
-                    logger.warning(f"{len(pending)} cleanup tasks did not complete within timeout")
+            except asyncio.TimeoutError:
+                logger.warning(f"Cleanup tasks did not complete within timeout")
             except Exception as e:
-                logger.error(f"Error waiting for cleanup tasks: {e}")
-        
-        # Allow any final async operations to complete
-        await asyncio.sleep(0.2)
+                logger.error(f"Error during cleanup tasks: {e}")
         
         # Cancel our own pending tasks (not all tasks in the event loop)
         self._cancel_pending_tasks()
