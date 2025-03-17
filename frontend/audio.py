@@ -60,6 +60,7 @@ class QueueAudioDevice(QIODevice):
         return True
 
     def mark_end_of_stream(self):
+        """Mark the stream as ended, indicating no more data will be written"""
         with QMutexLocker(self.mutex):
             logger.info(f"[QueueAudioDevice] Marking end of stream, current buffer size: {len(self.audio_buffer)}")
             self.end_of_stream = True
@@ -67,22 +68,29 @@ class QueueAudioDevice(QIODevice):
                 self.last_read_empty = True
                 logger.info("[QueueAudioDevice] Buffer empty at end-of-stream mark")
 
-    def clear_buffer(self):
+    def clear_buffer(self, mark_end=False):
+        """
+        Clear the audio buffer and optionally mark end of stream
+        
+        Args:
+            mark_end: If True, mark the end of stream after clearing
+        """
         with QMutexLocker(self.mutex):
             self.audio_buffer.clear()
-            self.end_of_stream = False
-            self.last_read_empty = False
-            logger.info("[QueueAudioDevice] Audio buffer cleared and state reset")
+            if mark_end:
+                self.end_of_stream = True
+                self.last_read_empty = True
+                logger.info("[QueueAudioDevice] Audio buffer cleared and marked as end")
+            else:
+                self.end_of_stream = False
+                self.last_read_empty = False
+                logger.info("[QueueAudioDevice] Audio buffer cleared and state reset")
 
     def reset_end_of_stream(self):
+        """Reset end-of-stream flags without clearing the buffer"""
         with QMutexLocker(self.mutex):
             self.end_of_stream = False
             self.last_read_empty = False
-
-    def clear_and_mark_end(self):
-        with QMutexLocker(self.mutex):
-            self.audio_buffer.clear()
-            self.end_of_stream = True
 
     def handle_audio_state(self, action):
         """Centralized method to handle audio device state transitions"""
@@ -238,7 +246,7 @@ class AudioManager(QObject):
         self.audio_state_changed.emit(QAudio.State.StoppedState)
         
         # Clear device buffer and audio queue
-        await asyncio.to_thread(self.audio_device.clear_and_mark_end)
+        await asyncio.to_thread(lambda: self.audio_device.clear_buffer(mark_end=True))
         
         # Clear the audio queue efficiently
         self._clear_audio_queue()
