@@ -356,6 +356,6 @@ class ChatController(QObject):
         # Clean up websocket
         if hasattr(self, 'ws_client'):
             logger.info("Cleaning up WebSocket client")
-            self.ws_client.cleanup()
+            asyncio.create_task(self.ws_client.close())
         
         logger.info("Chat controller resources cleaned up") 
