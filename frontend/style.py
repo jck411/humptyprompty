@@ -1,5 +1,6 @@
 # style.py
 # Consolidated styling and appearance module
+import os
 
 DARK_COLORS = {
     "background": "#1a1b26", 
@@ -27,115 +28,54 @@ LIGHT_COLORS = {
     "input_border": "#D3D7DC"
 }
 
-def generate_main_stylesheet(colors):
-    return f"""
-    QWidget {{
-        font-family: 'DejaVu Sans', 'sans-serif';
-        background-color: {colors['background']};
-    }}
-    QMainWindow {{
-        background-color: {colors['background']};
-    }}
-    QScrollArea {{
-        border: none;
-        background-color: {colors['background']};
-    }}
-    QScrollBar:vertical {{
-        border: none;
-        background: {colors['background']};
-        width: 10px;
-        margin: 0;
-    }}
-    QScrollBar::handle:vertical {{
-        background: {colors['input_border']};
-        border-radius: 5px;
-        min-height: 20px;
-    }}
-    QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
-        height: 0;
-        width: 0;
-        background: none;
-        border: none;
-    }}
-    QTextEdit {{
-        border: 1px solid {colors['input_border']};
-        border-radius: 20px;
-        padding: 10px;
-        background-color: {colors['input_background']};
-        color: {colors['text_primary']};
-        font-size: 14px;
-    }}
-    QPushButton {{
-        border: none;
-        border-radius: 25px;
-        background-color: {colors['button_primary']};
-        color: white;
-        padding: 5px;
-        font-weight: bold;
-        font-size: 13px;
-    }}
-    QPushButton:hover {{
-        background-color: {colors['button_hover']};
-    }}
-    QPushButton:pressed {{
-        background-color: {colors['button_pressed']};
-    }}
-    QLabel {{
-        color: {colors['text_primary']};
-        font-size: 14px;
-    }}
-    QPushButton#sttButton[isEnabled="true"][isListening="false"] {{
-        background-color: green !important;
-        color: white !important;
-        border: none;
-        border-radius: 10px;
-    }}
-    QPushButton#sttButton[isListening="true"] {{
-        background-color: red !important;
-        color: white !important;
-        border: none;
-        border-radius: 10px;
-    }}
-    QPushButton#autoSendButton[isAutoSend="true"] {{
-        background-color: green !important;
-        color: white !important;
-        border: none;
-        border-radius: 10px;
-    }}
-    QPushButton#ttsButton[isTtsEnabled="true"] {{
-        background-color: green !important;
-        color: white !important;
-        border: none;
-        border-radius: 10px;
-    }}
+def load_stylesheet(is_dark_mode):
     """
+    Load the appropriate stylesheet based on the current theme.
+    
+    Args:
+        is_dark_mode (bool): True for dark mode, False for light mode
+        
+    Returns:
+        str: The stylesheet content
+    """
+    theme = 'dark' if is_dark_mode else 'light'
+    stylesheet_path = os.path.join(os.path.dirname(__file__), 'styles', f'{theme}.qss')
+    
+    try:
+        with open(stylesheet_path, 'r') as file:
+            stylesheet = file.read()
+        return stylesheet
+    except FileNotFoundError:
+        print(f"Stylesheet file not found: {stylesheet_path}")
+        return ""
 
+# Kept for backward compatibility, redirects to load_stylesheet
+def generate_main_stylesheet(colors):
+    """
+    Legacy function that now loads the stylesheet from files.
+    Kept for backward compatibility.
+    
+    Args:
+        colors (dict): Dictionary of colors for the current theme (unused)
+        
+    Returns:
+        str: The stylesheet content
+    """
+    is_dark_mode = colors == DARK_COLORS
+    return load_stylesheet(is_dark_mode)
+
+# Kept for backward compatibility, will be handled by QSS files
 def get_message_bubble_stylesheet(is_user, colors):
-    if is_user:
-        return f"""
-            QFrame#messageBubble {{
-                background-color: {colors['user_bubble']};
-                border-radius: 15px;
-                margin: 5px 50px 5px 5px;
-                padding: 5px;
-            }}
-            QLabel {{
-                color: {colors['text_primary']};
-                font-size: 14px;
-                background-color: transparent;
-            }}
-        """
-    else:
-        return f"""
-            QFrame#messageBubble {{
-                background-color: {colors['assistant_bubble']};
-                margin: 5px 5px 5px 50px;
-                padding: 5px;
-            }}
-            QLabel {{
-                color: {colors['text_primary']};
-                font-size: 14px;
-                background-color: transparent;
-            }}
-        """
+    """
+    Legacy function for getting message bubble styles.
+    This is now handled by the QSS files.
+    
+    Args:
+        is_user (bool): Whether this is a user message bubble
+        colors (dict): Dictionary of colors for the current theme
+        
+    Returns:
+        str: Empty string as styles are now in QSS files
+    """
+    return ""
 

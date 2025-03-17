@@ -2,10 +2,11 @@
 from PyQt6.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 
-from frontend.style import DARK_COLORS, LIGHT_COLORS, generate_main_stylesheet
+from frontend.style import DARK_COLORS, LIGHT_COLORS, load_stylesheet
 from frontend.config import logger
+from frontend.themeable import Themeable
 
-class BaseWindow(QMainWindow):
+class BaseWindow(QMainWindow, Themeable):
     """
     Base window class that provides common functionality for all screen types.
     Subclasses should implement the setup_ui_content method to add their specific content.
@@ -97,7 +98,10 @@ class BaseWindow(QMainWindow):
     
     def apply_styling(self):
         """Apply stylesheet to the application"""
-        self.setStyleSheet(generate_main_stylesheet(self.colors))
+        stylesheet = load_stylesheet(self.is_dark_mode)
+        self.setStyleSheet(stylesheet)
+        # Update theme in this window and its components
+        self.update_theme(self.is_dark_mode, self.colors)
     
     def add_navigation_button(self, window_name, display_name):
         """
@@ -134,10 +138,14 @@ class BaseWindow(QMainWindow):
     def _update_theme_in_components(self):
         """
         Update theme colors in all child components that support theme changes.
-        This method looks for components with update_icons or update_colors methods
-        and calls them with the appropriate parameters.
+        This method finds all child components that inherit from Themeable
+        and calls their update_theme method.
         """
-        # Common component attribute names used in subclasses
+        # Find all Themeable children and update them
+        for child in self.findChildren(Themeable):
+            child.update_theme(self.is_dark_mode, self.colors)
+        
+        # For backward compatibility, also check for components by attribute name
         component_attributes = [
             'top_buttons', 'chat_area', 'input_area', 
             'clock_display', 'settings_panel',  # Add other potential components here
@@ -145,7 +153,7 @@ class BaseWindow(QMainWindow):
         
         for attr_name in component_attributes:
             component = getattr(self, attr_name, None)
-            if component:
+            if component and not isinstance(component, Themeable):
                 # Update icons if the component has this method
                 if hasattr(component, 'update_icons'):
                     component.update_icons(self.is_dark_mode)

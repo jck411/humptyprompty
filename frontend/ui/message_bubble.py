@@ -8,7 +8,8 @@ class MessageBubble(QFrame):
     def __init__(self, text, is_user=True):
         super().__init__()
         self.setObjectName("messageBubble")
-        self.setProperty("isUser", is_user)
+        # Set property for CSS selector - using string "true"/"false" for Qt stylesheet compatibility
+        self.setProperty("isUser", "true" if is_user else "false")
         
         # Setup layout
         layout = QVBoxLayout(self)

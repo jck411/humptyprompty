@@ -8,6 +8,7 @@ from frontend.clock_window import ClockWindow
 from frontend.chat_window import ChatWindow
 from frontend.config import logger
 from frontend.style import DARK_COLORS, LIGHT_COLORS
+from frontend.themeable import Themeable
 
 class WindowManager(QObject):
     """
@@ -254,10 +255,12 @@ class WindowManager(QObject):
                 window.colors = DARK_COLORS if is_dark_mode else LIGHT_COLORS
                 window.apply_styling()
                 
-                # Update components using the new centralized method
-                if hasattr(window, '_update_theme_in_components'):
+                # If the window is a Themeable, use the update_theme method
+                if isinstance(window, Themeable):
+                    window.update_theme(is_dark_mode, window.colors)
+                # Fallback to legacy methods for backward compatibility
+                elif hasattr(window, '_update_theme_in_components'):
                     window._update_theme_in_components()
-                # Fallback to legacy method if it exists (for backward compatibility)
                 elif hasattr(window, 'handle_theme_changed'):
                     window.handle_theme_changed(is_dark_mode)
     

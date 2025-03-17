@@ -3,10 +3,11 @@ from PyQt6.QtWidgets import QWidget, QHBoxLayout, QVBoxLayout, QPushButton, QSiz
 from PyQt6.QtCore import pyqtSignal, QSize
 from PyQt6.QtGui import QIcon, QColor, QPalette
 from frontend.icons import get_icon  # Import the centralized icon getter
+from frontend.themeable import Themeable
 
 from frontend.ui.text_input import CustomTextEdit
 
-class InputArea(QWidget):
+class InputArea(QWidget, Themeable):
     """
     UI component for the input area at the bottom of the chat window.
     """

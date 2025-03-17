@@ -1,0 +1,116 @@
+QWidget {
+    font-family: 'DejaVu Sans', 'sans-serif';
+    background-color: #1a1b26;
+    color: #a9b1d6;
+}
+
+QMainWindow {
+    background-color: #1a1b26;
+}
+
+QScrollArea {
+    border: none;
+    background-color: #1a1b26;
+}
+
+QScrollBar:vertical {
+    border: none;
+    background: #1a1b26;
+    width: 10px;
+    margin: 0;
+}
+
+QScrollBar::handle:vertical {
+    background: #414868;
+    border-radius: 5px;
+    min-height: 20px;
+}
+
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+    height: 0;
+    width: 0;
+    background: none;
+    border: none;
+}
+
+QTextEdit {
+    border: 1px solid #414868;
+    border-radius: 20px;
+    padding: 10px;
+    background-color: #24283b;
+    color: #a9b1d6;
+    font-size: 14px;
+}
+
+QPushButton {
+    border: none;
+    border-radius: 25px;
+    background-color: #7aa2f7;
+    color: white;
+    padding: 5px;
+    font-weight: bold;
+    font-size: 13px;
+}
+
+QPushButton:hover {
+    background-color: #3d59a1;
+}
+
+QPushButton:pressed {
+    background-color: #2ac3de;
+}
+
+QLabel {
+    color: #a9b1d6;
+    font-size: 14px;
+}
+
+QPushButton#sttButton[isEnabled="true"][isListening="false"] {
+    background-color: green !important;
+    color: white !important;
+    border: none;
+    border-radius: 10px;
+}
+
+QPushButton#sttButton[isListening="true"] {
+    background-color: red !important;
+    color: white !important;
+    border: none;
+    border-radius: 10px;
+}
+
+QPushButton#autoSendButton[isAutoSend="true"] {
+    background-color: green !important;
+    color: white !important;
+    border: none;
+    border-radius: 10px;
+}
+
+QPushButton#ttsButton[isTtsEnabled="true"] {
+    background-color: green !important;
+    color: white !important;
+    border: none;
+    border-radius: 10px;
+}
+
+/* User message bubble styles */
+QFrame#messageBubble[isUser="true"] {
+    background-color: #3b4261;
+    border-radius: 15px;
+    margin: 5px 50px 5px 5px;
+    padding: 5px;
+}
+
+/* Assistant message bubble styles */
+QFrame#messageBubble[isUser="false"] {
+    background-color: transparent;
+    margin: 5px 5px 5px 50px;
+    padding: 5px;
+}
+
+/* Message bubble label styles */
+QFrame#messageBubble QLabel {
+    color: #a9b1d6;
+    font-size: 14px;
+    background-color: transparent;
+} 

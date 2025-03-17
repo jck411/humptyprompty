@@ -5,8 +5,9 @@ from PyQt6.QtGui import QColor, QPalette
 
 from frontend.ui.message_bubble import MessageBubble
 from frontend.style import get_message_bubble_stylesheet
+from frontend.themeable import Themeable
 
-class ChatArea(QWidget):
+class ChatArea(QWidget, Themeable):
     """
     UI component that displays the chat messages.
     """
