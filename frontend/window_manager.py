@@ -152,8 +152,8 @@ class WindowManager(QObject):
         # If we have a previous window, match the geometry of the new window to it
         # to prevent resizing effects during transition
         if previous_window:
-            if window.is_kiosk_mode and previous_window.is_kiosk_mode:
-                # In kiosk mode, both windows should be fullscreen already
+            if window.is_kiosk_mode:
+                # Don't copy geometry for kiosk windows as they should be fullscreen
                 pass
             else:
                 # For normal windows, match the geometry exactly to prevent "bumping"
