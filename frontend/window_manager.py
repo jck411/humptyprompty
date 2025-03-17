@@ -123,8 +123,11 @@ class WindowManager(QObject):
             logger.error(str(e))
             return
             
+        # Store reference to previous window for smooth transition
+        previous_window = self.current_window
+            
         # Ensure kiosk mode is consistent when switching windows
-        if self.current_window and self.current_window.is_kiosk_mode and not window.is_kiosk_mode:
+        if previous_window and previous_window.is_kiosk_mode and not window.is_kiosk_mode:
             # If we're coming from a window in kiosk mode, make sure the new window is also in kiosk mode
             logger.info(f"Setting {window_name} to kiosk mode to match current window state")
             window.is_kiosk_mode = True
@@ -141,22 +144,38 @@ class WindowManager(QObject):
             if window_name == "chat" and hasattr(window, 'input_area'):
                 logger.info(f"Hiding input area for {window_name} in kiosk mode")
                 window.input_area.setVisible(False)
-            
-        # Hide current window if exists
-        if self.current_window:
-            self.current_window.hide()
-            
-        # Show new window
-        window.show()
         
-        # If window should be in kiosk mode, make sure it's in full screen
-        if window.is_kiosk_mode:
-            logger.info(f"Ensuring {window_name} is in full screen")
-            window.showFullScreen()
-        
-        # Update current window
+        # Update current window references before showing the new window
         self.current_window_name = window_name
         self.current_window = window
+        
+        # If we have a previous window, match the geometry of the new window to it
+        # to prevent resizing effects during transition
+        if previous_window:
+            if window.is_kiosk_mode and previous_window.is_kiosk_mode:
+                # In kiosk mode, both windows should be fullscreen already
+                pass
+            else:
+                # For normal windows, match the geometry exactly to prevent "bumping"
+                window.setGeometry(previous_window.geometry())
+        
+        # Prepare the new window but don't show it yet if we have a previous window
+        if previous_window:
+            # Initialize window with 0 opacity to prepare for fade-in
+            window.setWindowOpacity(0.0)
+            window.setVisible(True)
+            window.raise_()  # Place it above the current window
+            
+            # Start the cross-fade transition
+            QTimer.singleShot(10, lambda: self._start_fade_transition(window, previous_window))
+        else:
+            # If there's no previous window, just show the new one immediately
+            window.show()
+            
+            # If window should be in kiosk mode, make sure it's in full screen
+            if window.is_kiosk_mode:
+                logger.info(f"Ensuring {window_name} is in full screen")
+                window.showFullScreen()
         
         # Update rotation index
         if window_name in self.rotation_order:
@@ -165,6 +184,49 @@ class WindowManager(QObject):
         # Emit signal
         self.window_changed.emit(window_name)
         logger.info(f"Changed active window to: {window_name}")
+        
+    def _start_fade_transition(self, new_window, previous_window):
+        """Start a fade transition between windows"""
+        # Activate the new window
+        new_window.activateWindow()
+        
+        # If window should be in kiosk mode, make sure it's in full screen
+        if new_window.is_kiosk_mode:
+            logger.info(f"Ensuring {new_window.objectName() or 'window'} is in full screen")
+            new_window.showFullScreen()
+            
+        # Create a smooth cross-fade effect
+        fade_duration = 150  # milliseconds, adjust for desired speed
+        fade_steps = 10
+        
+        # Start the fade-in/fade-out process
+        self._fade_windows(new_window, previous_window, 0, fade_steps, fade_duration // fade_steps)
+        
+    def _fade_windows(self, new_window, previous_window, step, total_steps, step_duration):
+        """Perform one step of the cross-fade animation"""
+        if step > total_steps:
+            # Animation complete, finalize the transition
+            self._finalize_transition(previous_window)
+            return
+            
+        # Calculate opacity for this step
+        new_opacity = step / total_steps
+        prev_opacity = 1.0 - new_opacity
+        
+        # Set opacity on both windows
+        new_window.setWindowOpacity(new_opacity)
+        previous_window.setWindowOpacity(prev_opacity)
+        
+        # Schedule next step
+        QTimer.singleShot(step_duration, 
+                         lambda: self._fade_windows(new_window, previous_window, step + 1, total_steps, step_duration))
+        
+    def _finalize_transition(self, window):
+        """Finalize the transition by hiding the window after it's already invisible"""
+        # Hide the window now that it's invisible (opacity 0)
+        window.hide()
+        # Reset opacity for future use
+        window.setWindowOpacity(1.0)
     
     @pyqtSlot()
     def rotate_to_next_window(self):
