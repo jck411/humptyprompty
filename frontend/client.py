@@ -1,49 +1,76 @@
 #!/usr/bin/env python3
+"""
+Main entry point for the Smart Display application.
+Creates and runs the main container window.
+"""
+
+import os
 import sys
 import asyncio
-import os
+import signal
+import qasync
 from PyQt6.QtWidgets import QApplication
-from qasync import QEventLoop
+from PyQt6.QtCore import Qt, QTimer
 
-from frontend.window_manager import WindowManager
 from frontend.config import logger
+from frontend.container_window import create_container_window
 
-if __name__ == '__main__':
-    # Change to the project root directory to ensure paths are correct
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    project_root = os.path.dirname(script_dir)
-    os.chdir(project_root)
+def main():
+    """
+    Main application entry point.
+    Sets up the event loop and container window.
+    """
+    logger.info("Starting Smart Display application...")
     
-    print("Starting Smart Display application...")
+    # Create Qt application
     app = QApplication(sys.argv)
-    loop = QEventLoop(app)
+    
+    # Important: Set this flag to ensure global keyboard events are captured
+    app.setAttribute(Qt.ApplicationAttribute.AA_DontUseNativeDialogs, True)
+    
+    # Create the qasync loop
+    loop = qasync.QEventLoop(app)
     asyncio.set_event_loop(loop)
     
-    print("Creating window manager...")
-    # Create window manager instead of directly creating a window
-    window_manager = WindowManager()
+    # Create window manager
+    logger.info("Creating window manager...")
+    window = create_container_window()
     
-    print("Initializing window manager...")
-    # Initialize the window manager (will show the first window)
-    window_manager.initialize()
+    # Initialize window manager
+    logger.info("Initializing window manager...")
     
-    print("Starting event loop...")
+    # Set up signal handlers for clean shutdown
+    def signal_handler(sig, frame):
+        logger.info(f"Received signal {sig}, shutting down...")
+        window.close()
+        app.quit()
+    
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+    
+    # Define the cleanup coroutine
+    async def cleanup_async():
+        if hasattr(window, 'cleanup'):
+            try:
+                await window.cleanup()
+            except Exception as e:
+                logger.error(f"Error during window manager cleanup: {e}")
+    
+    # Register cleanup to run when the app is about to quit
+    app.aboutToQuit.connect(lambda: asyncio.ensure_future(cleanup_async()))
+    
+    # Start the event loop
+    logger.info("Starting event loop...")
+    
+    # Run the integrated event loop - this will handle both Qt and asyncio events
+    with loop:
+        return loop.run_forever()
+
+if __name__ == "__main__":
     try:
-        with loop:
-            loop.run_forever()
-    except KeyboardInterrupt:
-        logger.info("Keyboard interrupt received, shutting down...")
-    finally:
-        logger.info("Cleaning up before exit")
-        try:
-            # Need to create a new task and run it to completion
-            cleanup_task = asyncio.ensure_future(window_manager.cleanup())
-            loop.run_until_complete(cleanup_task)
-        except Exception as e:
-            logger.error(f"Error during window manager cleanup: {e}")
-            
-        # After window_manager cleanup, check for any remaining tasks
-        pending = asyncio.all_tasks(loop)
-        for task in pending:
-            if not task.done():
-                task.cancel()
+        # Run the main function directly
+        exit_code = main()
+        sys.exit(exit_code)
+    except Exception as e:
+        logger.error(f"Error in main application: {e}")
+        sys.exit(1)

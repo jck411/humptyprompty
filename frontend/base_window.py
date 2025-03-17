@@ -1,4 +1,26 @@
 #!/usr/bin/env python3
+# ALTERNATIVE APPROACH: Consider implementing a single main window with QStackedWidget
+# for smoother transitions. Instead of having multiple top-level windows, use a single window
+# with a QStackedWidget to hold different "screens" and implement transitions between those.
+# This approach avoids desktop background visibility issues during transitions.
+#
+# Example implementation:
+# class MainContainerWindow(QMainWindow):
+#     def __init__(self):
+#         super().__init__()
+#         self.setWindowTitle("Smart Display")
+#         # Create stacked widget to hold all screens
+#         self.stacked_widget = QStackedWidget()
+#         self.setCentralWidget(self.stacked_widget)
+#         
+#         # Add all your screen widgets
+#         self.clock_screen = ClockScreen()
+#         self.chat_screen = ChatScreen()
+#         self.stacked_widget.addWidget(self.clock_screen)
+#         self.stacked_widget.addWidget(self.chat_screen)
+#         
+#         # Implement cross-fade between screens using QPropertyAnimation
+
 from PyQt6.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 

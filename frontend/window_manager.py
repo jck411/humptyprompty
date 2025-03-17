@@ -2,6 +2,7 @@
 import asyncio
 import time
 from PyQt6.QtCore import QObject, QTimer, pyqtSignal, pyqtSlot, Qt, QPropertyAnimation, QEasingCurve
+from PyQt6.QtWidgets import QWidget
 from typing import List, Dict, Type, Optional, Set
 
 from frontend.base_window import BaseWindow
@@ -163,27 +164,27 @@ class WindowManager(QObject):
         self.current_window_name = window_name
         self.current_window = window
         
-        # If we have a previous window, match the geometry of the new window to it
-        # to prevent resizing effects during transition
+        # Prepare the new window but don't show it yet if we have a previous window
         if previous_window:
+            # Match geometry exactly before showing to ensure full overlap
             if window.is_kiosk_mode:
-                # Don't copy geometry for kiosk windows as they should be fullscreen
-                pass
+                # For kiosk mode, make sure we're using the full screen geometry
+                screen = previous_window.screen()
+                window.setGeometry(screen.geometry())
             else:
                 # For normal windows, match the geometry exactly to prevent "bumping"
                 window.setGeometry(previous_window.geometry())
-        
-        # Prepare the new window but don't show it yet if we have a previous window
-        if previous_window:
-            # Initialize window with 0 opacity to prepare for fade-in
-            window.setWindowOpacity(0.0)
             
-            # Show the window first (but invisible due to opacity=0)
+            # IMPORTANT: We need both windows to be fully visible and stacked properly
+            # before starting any opacity changes. The previous window is already visible.
+            
+            # Ensure the new window is fully prepped and ready
+            window.setWindowOpacity(0.0)  # Start completely transparent
             window.show()
-            window.raise_()  # Ensure it's above other windows
+            window.raise_()              # Make sure new window is on top
             
-            # Start the cross-fade transition immediately
-            self._start_fade_transition(window, previous_window)
+            # Let the event loop process the window stacking before animations
+            QTimer.singleShot(10, lambda: self._start_fade_transition(window, previous_window))
         else:
             # If there's no previous window, just show the new one immediately
             window.show()
@@ -204,8 +205,8 @@ class WindowManager(QObject):
         # Update last used time for the window (using timestamp in milliseconds)
         self.window_last_used[window_name] = int(time.time() * 1000)
     
-    def _start_fade_transition(self, new_window, previous_window, original_flags=None):
-        """Start a fade transition between windows"""
+    def _start_fade_transition(self, new_window, previous_window):
+        """Start a pure cross-fade transition between windows"""
         # If window should be in kiosk mode, make sure it's in full screen
         if new_window.is_kiosk_mode:
             logger.info(f"Ensuring {new_window.objectName() or 'window'} is in full screen")
@@ -214,23 +215,24 @@ class WindowManager(QObject):
         # Activate the new window to ensure it has focus
         new_window.activateWindow()
         
-        # Use QPropertyAnimation for smoother fade transitions
-        fade_duration = 300  # milliseconds - longer for smoother transition
+        # Create a parallel animation group to ensure both animations run in sync
+        fade_duration = 400  # milliseconds
         
-        # Create animations for both windows
+        # Create fade-in animation for new window
         self.fade_in_animation = QPropertyAnimation(new_window, b"windowOpacity")
         self.fade_in_animation.setDuration(fade_duration)
         self.fade_in_animation.setStartValue(0.0)
         self.fade_in_animation.setEndValue(1.0)
-        self.fade_in_animation.setEasingCurve(QEasingCurve.Type.InOutCubic)
+        self.fade_in_animation.setEasingCurve(QEasingCurve.Type.InOutQuad)
         
+        # Create fade-out animation for previous window
         self.fade_out_animation = QPropertyAnimation(previous_window, b"windowOpacity")
         self.fade_out_animation.setDuration(fade_duration)
-        self.fade_out_animation.setStartValue(1.0)
+        self.fade_out_animation.setStartValue(1.0) 
         self.fade_out_animation.setEndValue(0.0)
-        self.fade_out_animation.setEasingCurve(QEasingCurve.Type.InOutCubic)
+        self.fade_out_animation.setEasingCurve(QEasingCurve.Type.InOutQuad)
         
-        # Connect to animation finished signals
+        # Hide the previous window when its animation is done
         self.fade_out_animation.finished.connect(lambda: self._finalize_transition(previous_window))
         
         # Start both animations
