@@ -5,7 +5,6 @@ import aiohttp
 import websockets
 from PyQt6.QtCore import QObject, pyqtSignal
 from frontend.config import SERVER_HOST, SERVER_PORT, WEBSOCKET_PATH, HTTP_BASE_URL, logger
-from frontend.stt.config import STT_CONFIG
 import concurrent.futures
 
 async def send_with_timeout(method, url, timeout=10, **kwargs):

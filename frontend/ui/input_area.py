@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-from PyQt6.QtWidgets import QWidget, QHBoxLayout, QVBoxLayout, QPushButton, QSizePolicy
+from PyQt6.QtWidgets import QWidget, QHBoxLayout, QPushButton
 from PyQt6.QtCore import pyqtSignal, QSize
-from PyQt6.QtGui import QIcon, QColor, QPalette
+from PyQt6.QtGui import QColor, QPalette
 from frontend.icons import get_icon  # Import the centralized icon getter
 from frontend.themeable import Themeable
 

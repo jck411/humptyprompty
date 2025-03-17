@@ -2,14 +2,10 @@
 """
 Wake word detector for the Humptyprompty application
 """
-import os
-import sys
 import struct
 import time
-import asyncio
 import threading
 import logging
-import numpy as np
 import pyaudio
 from pathlib import Path
 from PyQt6.QtCore import QObject, pyqtSignal

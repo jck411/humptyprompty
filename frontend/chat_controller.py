@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 import asyncio
-import json
 from PyQt6.QtCore import QObject, pyqtSignal
 
 from frontend.network import AsyncWebSocketClient

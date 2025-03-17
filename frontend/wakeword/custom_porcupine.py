@@ -6,7 +6,6 @@ This provides a compatible interface even if the real Porcupine library fails
 import os
 import numpy as np
 import time
-from pathlib import Path
 from frontend.config import logger
 
 class AudioLevelDetector:
@@ -86,7 +85,6 @@ def create(keyword_paths=None, sensitivities=None, model_path=None, library_path
                 
                 try:
                     # Monkey patch the library validator to always pass
-                    import types
                     if hasattr(pvporcupine, '_util'):
                         orig_validate = pvporcupine._util._pv_library_path
                         def patched_validate(*args, **kwargs):

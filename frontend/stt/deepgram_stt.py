@@ -5,8 +5,6 @@ import json
 import logging
 import threading
 import time
-from queue import Queue
-from signal import SIGINT, SIGTERM
 import concurrent.futures
 
 from deepgram import (
@@ -18,7 +16,7 @@ from deepgram import (
 )
 from PyQt6.QtCore import QObject, pyqtSignal
 from dotenv import load_dotenv
-from .config import AUDIO_CONFIG, DEEPGRAM_CONFIG, STT_CONFIG
+from .config import DEEPGRAM_CONFIG, STT_CONFIG
 
 logging.basicConfig(level=logging.INFO)
 

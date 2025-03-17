@@ -1,15 +1,11 @@
 #!/usr/bin/env python3
 from PyQt6.QtWidgets import QWidget, QHBoxLayout, QPushButton
 from PyQt6.QtCore import pyqtSignal, QSize
-from PyQt6.QtGui import QIcon, QPainter, QColor
 from frontend.config import logger
 from frontend.icons import get_icon  # Import the centralized icon getter
 from frontend.themeable import Themeable
 import PyQt6.QtWidgets
 import PyQt6.QtGui
-import os
-import tempfile
-import time
 
 class TopButtons(QWidget, Themeable):
     """

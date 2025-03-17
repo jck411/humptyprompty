@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
 import asyncio
-import json
-import logging
 from PyQt6.QtCore import QObject, pyqtSignal, QMutex, QMutexLocker, QIODevice
 from PyQt6.QtMultimedia import QAudioFormat, QAudioSink, QMediaDevices, QAudio
 import time

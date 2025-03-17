@@ -1,11 +1,7 @@
 #!/usr/bin/env python3
-import sys
 import asyncio
-from PyQt6.QtWidgets import QWidget, QVBoxLayout
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import QTimer
 
-from frontend.config import logger
-from frontend.style import DARK_COLORS, LIGHT_COLORS, generate_main_stylesheet
 from frontend.chat_controller import ChatController
 from frontend.ui import ChatArea, InputArea, TopButtons
 from frontend.base_window import BaseWindow

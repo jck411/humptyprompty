@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-import time
 from datetime import datetime
 from PyQt6.QtWidgets import QLabel, QVBoxLayout, QWidget
 from PyQt6.QtCore import Qt, QTimer, pyqtSlot

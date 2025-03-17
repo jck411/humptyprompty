@@ -2,7 +2,6 @@
 """
 Integration module to connect wake word detection with STT functionality
 """
-import os
 import asyncio
 from pathlib import Path
 from PyQt6.QtCore import QObject, pyqtSignal, pyqtSlot
