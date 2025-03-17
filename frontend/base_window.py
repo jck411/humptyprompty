@@ -25,12 +25,30 @@ class BaseWindow(QMainWindow):
         self.is_dark_mode = True
         self.colors = DARK_COLORS
         self.is_kiosk_mode = False
+        self.previous_geometry = None  # Store window geometry for proper restoration
         
         # Setup UI components
         self.setup_ui()
         
         # Initialize theme
         self.apply_styling()
+    
+    def is_primary_window(self):
+        """
+        Determine if this window is the primary window (e.g., ChatWindow).
+        Subclasses should override this method to return True if they are the primary window.
+        
+        For backward compatibility, this also checks if the class name is 'ChatWindow'.
+        """
+        # For backward compatibility, check the class name
+        return self.__class__.__name__.lower() == 'chatwindow'
+    
+    def get_default_window_to_switch(self):
+        """
+        Return the default window to switch to when exiting this window.
+        Subclasses can override this to specify a different default window.
+        """
+        return "chat"
     
     def setup_ui(self):
         """Setup the base UI components"""
@@ -90,33 +108,42 @@ class BaseWindow(QMainWindow):
     
     def toggle_kiosk_mode(self):
         """Toggle fullscreen/kiosk mode"""
-        self.is_kiosk_mode = not self.is_kiosk_mode
+        # Save current state before toggling
+        was_kiosk_mode = self.is_kiosk_mode
+        self.is_kiosk_mode = not was_kiosk_mode
+        
         logger.info(f"{self.__class__.__name__}: Toggling kiosk mode to {self.is_kiosk_mode}")
         
-        # Store current geometry before changing window flags
-        geometry = self.geometry()
+        # Store current geometry before changing window state if not already stored
+        if not was_kiosk_mode:
+            self.previous_geometry = self.geometry()
+        
+        # First, hide the window while we change its properties to prevent visual glitches
+        self.hide()
         
         if self.is_kiosk_mode:
             # Enter kiosk mode
             self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
-            self.showFullScreen()
-            # No longer need to show navigation buttons as they're now in the header
-            # self.show_navigation_buttons(True)
+            self.show()
+            # Explicitly call showFullScreen() after show() to ensure proper fullscreen state
+            QTimer.singleShot(50, self.showFullScreen)
         else:
             # Exit kiosk mode
             self.setWindowFlags(Qt.WindowType.Window)
-            self.showNormal()
-            # Restore previous geometry
-            self.setGeometry(geometry)
+            self.show()
+            # Explicitly call showNormal() after show() to ensure proper window state
+            QTimer.singleShot(50, self.showNormal)
+            
+            # Restore previous geometry if available
+            if self.previous_geometry:
+                QTimer.singleShot(100, lambda: self.setGeometry(self.previous_geometry))
+            
             # Hide navigation buttons
             self.show_navigation_buttons(False)
         
         # Update top buttons if the subclass has implemented them
         if hasattr(self, 'top_buttons'):
             self.top_buttons.set_kiosk_mode(self.is_kiosk_mode)
-        
-        # Need to re-show the window after changing flags
-        self.show()
     
     def show_navigation_buttons(self, visible):
         """Show or hide navigation buttons"""
@@ -129,17 +156,17 @@ class BaseWindow(QMainWindow):
         """Handle key press events"""
         # ESC key behavior
         if event.key() == Qt.Key.Key_Escape:
-            # If this is the chat window, toggle kiosk mode
-            if self.__class__.__name__.lower() == 'chatwindow':
+            # If this is the primary window (e.g., ChatWindow), toggle kiosk mode
+            if self.is_primary_window():
                 self.toggle_kiosk_mode()
                 
                 # If toggling to kiosk mode and we have at least one navigation window available,
                 # switch to clock window after a short delay
                 if self.is_kiosk_mode and self.nav_layout.count() > 0:
                     QTimer.singleShot(500, lambda: self.window_switch_requested.emit("clock"))
-            # For other windows in kiosk mode, return to chat window
+            # For other windows in kiosk mode, return to the default window (typically chat)
             elif self.is_kiosk_mode:
-                self.window_switch_requested.emit("chat")
+                self.window_switch_requested.emit(self.get_default_window_to_switch())
         else:
             super().keyPressEvent(event)
     
@@ -148,7 +175,8 @@ class BaseWindow(QMainWindow):
         # If in kiosk mode, ensure the window is in fullscreen
         if self.is_kiosk_mode:
             logger.info(f"{self.__class__.__name__}: Ensuring fullscreen in kiosk mode")
-            self.showFullScreen()
+            # Use a small delay to ensure the window is fully shown before going fullscreen
+            QTimer.singleShot(50, self.showFullScreen)
             
         super().showEvent(event)
     

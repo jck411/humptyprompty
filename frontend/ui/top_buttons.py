@@ -391,8 +391,8 @@ class TopButtons(QWidget):
         """Update the icon colors based on theme"""
         self.is_dark_mode = is_dark_mode
         
-        # The SVG icons are designed to work with both themes
-        # No color changes are needed for the icons
+        # The SVG icons are designed to work with both themes using their own internal colors
+        # No color changes are needed for the icons as they automatically adapt to the theme
         logger.info(f"Theme updated to {'dark' if is_dark_mode else 'light'} mode - icons remain unchanged")
         
         # If we need to refresh the icons for any reason, we can do it here
