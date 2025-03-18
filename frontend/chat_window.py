@@ -70,6 +70,7 @@ class ChatWindow(QMainWindow):
         self.top_buttons.clear_clicked.connect(self.clear_chat)
         self.top_buttons.theme_toggled.connect(self.toggle_theme)
         self.top_buttons.stop_clicked.connect(lambda: asyncio.create_task(self.controller.stop_tts_and_generation_async()))
+        self.top_buttons.sound_toggled.connect(lambda: asyncio.create_task(self.controller.toggle_tts_async()))
         
         # Connect input area signals
         self.input_area.send_clicked.connect(self.send_message)
@@ -80,6 +81,7 @@ class ChatWindow(QMainWindow):
         self.controller.connection_status_changed.connect(self.handle_connection_status)
         self.controller.stt_state_changed.connect(self.top_buttons.update_stt_state)
         self.controller.tts_state_changed.connect(self.top_buttons.update_tts_state)
+        self.controller.tts_state_changed.connect(self.handle_tts_state_change)
         self.controller.auto_send_state_changed.connect(self.top_buttons.update_auto_send_state)
         self.controller.final_stt_text_received.connect(self.handle_stt_text)
         self.controller.user_message_added.connect(lambda text: self.chat_area.add_message(text, True))
@@ -118,6 +120,12 @@ class ChatWindow(QMainWindow):
         self.input_area.text_input.setPlainText(text)
         self.input_area.adjust_text_input_height()
     
+    def handle_tts_state_change(self, is_enabled):
+        """Handle TTS state change"""
+        # Update kiosk mode sound buttons if in kiosk mode
+        if self.is_kiosk_mode:
+            self.top_buttons.update_kiosk_mode(True, is_enabled)
+    
     def keyPressEvent(self, event):
         """Handle key press events"""
         if event.key() == Qt.Key.Key_Escape:
@@ -147,6 +155,9 @@ class ChatWindow(QMainWindow):
             
         # Show the window after changing flags
         self.show()
+        
+        # Update top buttons for kiosk mode
+        self.top_buttons.update_kiosk_mode(self.is_kiosk_mode, self.controller.tts_enabled)
     
     def update_ui_visibility(self, visible):
         """Update UI element visibility based on kiosk mode"""

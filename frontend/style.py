@@ -29,84 +29,113 @@ LIGHT_COLORS = {
 
 def generate_main_stylesheet(colors):
     return f"""
+    /* Base styling for all widgets */
     QWidget {{
         font-family: 'DejaVu Sans', 'sans-serif';
         background-color: {colors['background']};
     }}
+    
     QMainWindow {{
         background-color: {colors['background']};
     }}
+    
+    /* Scrollbars */
     QScrollArea {{
         border: none;
         background-color: {colors['background']};
     }}
+    
     QScrollBar:vertical {{
         border: none;
         background: {colors['background']};
-        width: 10px;
+        width: 14px;  /* Wider for touch */
         margin: 0;
     }}
+    
     QScrollBar::handle:vertical {{
         background: {colors['input_border']};
-        border-radius: 5px;
-        min-height: 20px;
+        border-radius: 7px;
+        min-height: 40px;  /* Easier to grab */
     }}
-    QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
-        height: 0;
-        width: 0;
-        background: none;
-        border: none;
-    }}
-    QTextEdit {{
-        border: 1px solid {colors['input_border']};
-        border-radius: 20px;
-        padding: 10px;
-        background-color: {colors['input_background']};
+    
+    /* Typography */
+    QLabel {{
         color: {colors['text_primary']};
-        font-size: 14px;
+        font-size: 16px;  /* Larger for readability */
     }}
+    
+    QLabel[title="true"] {{
+        font-size: 24px;
+        font-weight: bold;
+    }}
+    
+    /* Buttons */
     QPushButton {{
-        border: none;
-        border-radius: 25px;
         background-color: {colors['button_primary']};
         color: white;
-        padding: 5px;
-        font-weight: bold;
-        font-size: 13px;
+        border: none;
+        padding: 14px;  /* Larger for touch */
+        border-radius: 8px;
+        font-size: 16px;
+        min-height: 48px;
     }}
+    
     QPushButton:hover {{
         background-color: {colors['button_hover']};
     }}
+    
     QPushButton:pressed {{
         background-color: {colors['button_pressed']};
     }}
-    QLabel {{
+    
+    /* Input elements */
+    QLineEdit, QTextEdit {{
+        background-color: {colors['input_background']};
         color: {colors['text_primary']};
-        font-size: 14px;
+        border: 1px solid {colors['input_border']};
+        border-radius: 8px;
+        padding: 10px;
+        font-size: 16px;
     }}
-    QPushButton#sttButton[isEnabled="true"][isListening="false"] {{
-        background-color: green !important;
-        color: white !important;
-        border: none;
-        border-radius: 10px;
+    
+    QLineEdit:focus, QTextEdit:focus {{
+        border: 2px solid {colors['button_primary']};
     }}
-    QPushButton#sttButton[isListening="true"] {{
-        background-color: red !important;
-        color: white !important;
-        border: none;
-        border-radius: 10px;
+    
+    /* Kiosk-specific styling */
+    QStackedWidget {{
+        background-color: {colors['background']};
     }}
-    QPushButton#autoSendButton[isAutoSend="true"] {{
-        background-color: green !important;
-        color: white !important;
-        border: none;
-        border-radius: 10px;
+    
+    /* Navigation bar styling */
+    #nav_bar {{
+        background-color: {colors['input_background']};
+        border-bottom: 2px solid {colors['input_border']};
+        min-height: 70px;
     }}
-    QPushButton#ttsButton[isTtsEnabled="true"] {{
-        background-color: green !important;
-        color: white !important;
-        border: none;
-        border-radius: 10px;
+    
+    #nav_bar QLabel {{
+        font-size: 22px;
+        font-weight: bold;
+        color: {colors['text_primary']};
+    }}
+    
+    #nav_bar QPushButton {{
+        background-color: transparent;
+        border-radius: 24px;
+        min-width: 56px;
+        min-height: 56px;
+        icon-size: 30px;
+        padding: 12px;
+        margin: 0 4px;
+    }}
+    
+    #nav_bar QPushButton:hover {{
+        background-color: {colors['button_hover']};
+    }}
+    
+    #nav_bar QPushButton[current="true"] {{
+        background-color: {colors['button_primary']};
     }}
     """
 

@@ -11,9 +11,9 @@ class TopButtons(QWidget):
     stt_toggled = pyqtSignal()
     tts_toggled = pyqtSignal()
     clear_clicked = pyqtSignal()
-    theme_toggled = pyqtSignal()
     auto_send_toggled = pyqtSignal()
     stop_clicked = pyqtSignal()
+    sound_toggled = pyqtSignal()  # Signal for sound toggle in kiosk mode
     
     def __init__(self):
         super().__init__()
@@ -77,6 +77,42 @@ class TopButtons(QWidget):
         """)
         self.mic_button.setVisible(False)  # Initially hidden
         
+        # Create sound toggle button for kiosk mode (sound on)
+        self.sound_on_button = QPushButton()
+        self.sound_on_button.setFixedSize(45, 45)
+        self.sound_on_button.setIcon(QIcon("frontend/icons/sound_on.svg"))
+        self.sound_on_button.setIconSize(QSize(30, 30))
+        self.sound_on_button.clicked.connect(self.on_sound_toggled)
+        self.sound_on_button.setStyleSheet("""
+            QPushButton {
+                border: none;
+                border-radius: 20px;
+                background-color: transparent;
+            }
+            QPushButton:hover {
+                background-color: rgba(128, 128, 128, 0.1);
+            }
+        """)
+        self.sound_on_button.setVisible(False)  # Initially hidden in regular mode
+        
+        # Create sound toggle button for kiosk mode (sound off)
+        self.sound_off_button = QPushButton()
+        self.sound_off_button.setFixedSize(45, 45)
+        self.sound_off_button.setIcon(QIcon("frontend/icons/sound_off.svg"))
+        self.sound_off_button.setIconSize(QSize(30, 30))
+        self.sound_off_button.clicked.connect(self.on_sound_toggled)
+        self.sound_off_button.setStyleSheet("""
+            QPushButton {
+                border: none;
+                border-radius: 20px;
+                background-color: transparent;
+            }
+            QPushButton:hover {
+                background-color: rgba(128, 128, 128, 0.1);
+            }
+        """)
+        self.sound_off_button.setVisible(False)  # Initially hidden in regular mode
+        
         # Create stop button
         self.stop_button = QPushButton()
         self.stop_button.setFixedSize(45, 45)
@@ -111,28 +147,12 @@ class TopButtons(QWidget):
             }
         """)
         
-        # Create theme toggle button
-        self.theme_button = QPushButton()
-        self.theme_button.setFixedSize(45, 45)
-        self.theme_button.setIcon(QIcon("frontend/icons/dark_mode.svg"))
-        self.theme_button.setIconSize(QSize(35, 35))
-        self.theme_button.clicked.connect(self.on_theme_toggled)
-        self.theme_button.setStyleSheet("""
-            QPushButton {
-                border: none;
-                border-radius: 20px;
-                background-color: transparent;
-            }
-            QPushButton:hover {
-                background-color: rgba(128, 128, 128, 0.1);
-            }
-        """)
-        
-        # Add stop and theme buttons to main layout
+        # Add all buttons to main layout
         self.main_layout.addWidget(self.mic_button)
+        self.main_layout.addWidget(self.sound_on_button)
+        self.main_layout.addWidget(self.sound_off_button)
         self.main_layout.addWidget(self.stop_button)
         self.main_layout.addWidget(self.clear_button)
-        self.main_layout.addWidget(self.theme_button)
     
     def on_stt_toggled(self):
         """Handle STT button click"""
@@ -152,13 +172,13 @@ class TopButtons(QWidget):
         """Handle clear button click"""
         self.clear_clicked.emit()
     
-    def on_theme_toggled(self):
-        """Handle theme button click"""
-        self.theme_toggled.emit()
-        
     def on_stop_clicked(self):
         """Handle stop button click"""
         self.stop_clicked.emit()
+    
+    def on_sound_toggled(self):
+        """Handle sound toggle button click in kiosk mode"""
+        self.sound_toggled.emit()
     
     def update_stt_state(self, is_enabled, is_listening=False):
         """
@@ -193,6 +213,11 @@ class TopButtons(QWidget):
         self.tts_button.setText(f"TTS {'On' if is_enabled else 'Off'}")
         self.tts_button.setProperty("isTtsEnabled", is_enabled)
         
+        # Also update sound buttons visibility in kiosk mode
+        # Only one should be visible at a time based on the TTS state
+        self.sound_on_button.setVisible(is_enabled)
+        self.sound_off_button.setVisible(not is_enabled)
+        
         # Force style update
         style = self.tts_button.style()
         if style:
@@ -212,7 +237,25 @@ class TopButtons(QWidget):
             style.polish(self.auto_send_button)
         self.auto_send_button.update()
     
+    def update_kiosk_mode(self, is_kiosk_mode, tts_enabled):
+        """Update UI for kiosk mode"""
+        if is_kiosk_mode:
+            # Show the appropriate sound button based on TTS state
+            self.sound_on_button.setVisible(tts_enabled)
+            self.sound_off_button.setVisible(not tts_enabled)
+        else:
+            # Hide both sound buttons in regular mode
+            self.sound_on_button.setVisible(False)
+            self.sound_off_button.setVisible(False)
+    
     def update_theme_icon(self, is_dark_mode):
-        """Update the theme button icon based on current theme"""
-        icon_path = "frontend/icons/light_mode.svg" if is_dark_mode else "frontend/icons/dark_mode.svg"
-        self.theme_button.setIcon(QIcon(icon_path)) 
+        """
+        Update the theme indicator based on the current mode
+        
+        Args:
+            is_dark_mode: Whether dark mode is enabled
+        """
+        # Use text to indicate theme instead of an icon for better reliability
+        theme_text = "Dark Mode" if is_dark_mode else "Light Mode"
+        # The actual button implementation might be elsewhere, just log for now
+        pass 
