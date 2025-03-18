@@ -3,7 +3,7 @@ import sys
 import asyncio
 from PyQt6.QtWidgets import QApplication
 from qasync import QEventLoop
-from frontend.chat_window import ChatWindow
+from frontend.main_window import MainWindow
 from frontend.config import logger
 
 if __name__ == '__main__':
@@ -11,7 +11,7 @@ if __name__ == '__main__':
     loop = QEventLoop(app)
     asyncio.set_event_loop(loop)
     
-    window = ChatWindow()
+    window = MainWindow()
     window.apply_styling()
     window.show()
     

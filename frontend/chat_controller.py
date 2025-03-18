@@ -165,8 +165,28 @@ class ChatController(QObject):
     
     def clear_chat_history(self):
         """Clear the chat history"""
+        # Clear local message history
         self.messages = []
         self.assistant_text_in_progress = ""
+        
+        # Clear WebSocket client's message history
+        if hasattr(self, 'ws_client'):
+            self.ws_client.clear_messages()
+            
+            # Also send a reset-context message to ensure the server starts fresh
+            if self.ws_client.ws:
+                asyncio.create_task(self._reset_server_context())
+        
+        logger.info("Chat history cleared locally and on server")
+    
+    async def _reset_server_context(self):
+        """Helper method to reset the server context"""
+        try:
+            if self.ws_client.ws:
+                await self.ws_client.ws.send(json.dumps({"action": "reset-context"}))
+                logger.info("Sent reset-context request to server after clearing chat")
+        except Exception as e:
+            logger.error(f"Error resetting server context: {e}")
     
     def handle_audio_state_changed(self, state):
         """Handle audio state changes"""
@@ -351,4 +371,4 @@ class ChatController(QObject):
         if hasattr(self, 'ws_client'):
             asyncio.create_task(self.ws_client.close())
         
-        logger.info("Chat controller resources cleaned up") 
+        logger.info("Chat controller resources cleaned up")

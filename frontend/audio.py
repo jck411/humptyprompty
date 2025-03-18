@@ -2,7 +2,7 @@
 import asyncio
 import json
 import logging
-from PyQt6.QtCore import QObject, pyqtSignal, QMutex, QMutexLocker, QIODevice
+from PyQt6.QtCore import QObject, pyqtSignal, QMutex, QMutexLocker, QIODevice, QTimer
 from PyQt6.QtMultimedia import QAudioFormat, QAudioSink, QMediaDevices, QAudio
 import time
 
@@ -131,9 +131,21 @@ class AudioManager(QObject):
     
     def start_audio_consumer(self):
         """Start the async audio consumer task"""
+        # Use QTimer.singleShot to ensure there's a running event loop
+        # when creating the asyncio task
+        QTimer.singleShot(0, self._create_audio_task)
+        logger.info("Audio consumer task scheduled to start")
+    
+    def _create_audio_task(self):
+        """Create the async audio consumer task with proper event loop"""
         if not self.audio_consumer_task or self.audio_consumer_task.done():
-            self.audio_consumer_task = asyncio.create_task(self.audio_consumer())
-            logger.info("Started audio consumer task")
+            try:
+                self.audio_consumer_task = asyncio.create_task(self.audio_consumer())
+                logger.info("Started audio consumer task")
+            except RuntimeError as e:
+                logger.error(f"Failed to create audio consumer task: {e}")
+                # Try again after a short delay
+                QTimer.singleShot(100, self._create_audio_task)
     
     async def audio_consumer(self):
         """Async consumer that processes audio data from the queue"""
@@ -294,4 +306,4 @@ class AudioManager(QObject):
         except asyncio.QueueEmpty:
             pass
         
-        logger.info("Audio resources fully cleaned up and released") 
+        logger.info("Audio resources fully cleaned up and released")

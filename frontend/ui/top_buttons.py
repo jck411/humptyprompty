@@ -15,7 +15,7 @@ class TopButtons(QWidget):
     auto_send_toggled = pyqtSignal()
     stop_clicked = pyqtSignal()
     
-    def __init__(self):
+    def __init__(self, show_theme_button=True):
         super().__init__()
         
         # Setup main layout
@@ -152,25 +152,28 @@ class TopButtons(QWidget):
         # Add left buttons to main layout
         self.main_layout.addWidget(left_buttons, stretch=1)
         
-        # Create theme toggle button
-        self.theme_button = QPushButton()
-        self.theme_button.setFixedSize(45, 45)
-        self.theme_button.setIcon(QIcon("frontend/icons/dark_mode.svg"))
-        self.theme_button.setIconSize(QSize(35, 35))
-        self.theme_button.clicked.connect(self.on_theme_toggled)
-        self.theme_button.setStyleSheet("""
-            QPushButton {
-                border: none;
-                border-radius: 20px;
-                background-color: transparent;
-            }
-            QPushButton:hover {
-                background-color: rgba(128, 128, 128, 0.1);
-            }
-        """)
-        
-        # Add theme button to main layout
-        self.main_layout.addWidget(self.theme_button)
+        # Create theme toggle button (optional)
+        if show_theme_button:
+            self.theme_button = QPushButton()
+            self.theme_button.setFixedSize(45, 45)
+            self.theme_button.setIcon(QIcon("frontend/icons/dark_mode.svg"))
+            self.theme_button.setIconSize(QSize(35, 35))
+            self.theme_button.clicked.connect(self.on_theme_toggled)
+            self.theme_button.setStyleSheet("""
+                QPushButton {
+                    border: none;
+                    border-radius: 20px;
+                    background-color: transparent;
+                }
+                QPushButton:hover {
+                    background-color: rgba(128, 128, 128, 0.1);
+                }
+            """)
+            
+            # Add theme button to main layout
+            self.main_layout.addWidget(self.theme_button)
+        else:
+            self.theme_button = None
         
         # Store buttons that should be hidden in kiosk mode
         self.normal_mode_buttons = [self.stt_button, self.auto_send_button, 
@@ -263,8 +266,9 @@ class TopButtons(QWidget):
     
     def update_theme_icon(self, is_dark_mode):
         """Update the theme button icon based on current theme"""
-        icon_path = "frontend/icons/light_mode.svg" if is_dark_mode else "frontend/icons/dark_mode.svg"
-        self.theme_button.setIcon(QIcon(icon_path))
+        if self.theme_button:
+            icon_path = "frontend/icons/light_mode.svg" if is_dark_mode else "frontend/icons/dark_mode.svg"
+            self.theme_button.setIcon(QIcon(icon_path))
     
     def set_kiosk_mode(self, is_kiosk_mode):
         """Toggle between kiosk mode and normal mode
