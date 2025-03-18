@@ -7,6 +7,7 @@ class ScreenManager(QStackedWidget):
     Manages screen transitions and automatic rotation.
     """
     theme_changed = pyqtSignal(bool)  # Signal for when theme changes (is_dark_mode)
+    screen_changed = pyqtSignal(str)  # Signal for when screen changes (screen_name)
     
     def __init__(self, colors):
         super().__init__()
@@ -38,6 +39,9 @@ class ScreenManager(QStackedWidget):
             self.setCurrentWidget(screen)
             screen.activate()
             
+            # Emit the signal that the screen has changed
+            self.screen_changed.emit(name)
+            
     def rotate_screen(self):
         """Rotate to the next screen in the sequence"""
         if len(self.screens) <= 1:
@@ -56,6 +60,12 @@ class ScreenManager(QStackedWidget):
         next_screen = self.currentWidget()
         if next_screen:
             next_screen.activate()
+            
+            # Find screen name and emit signal
+            for name, screen in self.screens.items():
+                if screen == next_screen:
+                    self.screen_changed.emit(name)
+                    break
             
     def start_rotation(self, interval=30000):
         """Start automatic screen rotation with the given interval (in ms)"""

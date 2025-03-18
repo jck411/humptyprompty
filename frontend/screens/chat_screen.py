@@ -35,6 +35,9 @@ class ChatScreen(BaseScreen):
         main_layout.setContentsMargins(10, 10, 10, 10)
         main_layout.setSpacing(0)
         
+        # Store reference to main layout
+        self.main_layout = main_layout
+        
         # Create UI components - pass False to hide theme button
         self.top_buttons = TopButtons(show_theme_button=False)
         self.chat_area = ChatArea(self.colors)
@@ -95,7 +98,11 @@ class ChatScreen(BaseScreen):
 
     def deactivate(self):
         """Clean up when the screen is hidden"""
-        pass
+        # Ensure top_buttons is back in our layout when screen is hidden
+        if self.top_buttons.parent() != self:
+            # If top_buttons has been moved elsewhere, bring it back
+            self.top_buttons.setParent(None)
+            self.main_layout.insertWidget(0, self.top_buttons)
         
     def update_colors(self, colors):
         """Update the color scheme"""

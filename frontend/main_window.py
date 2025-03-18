@@ -55,15 +55,31 @@ class MainWindow(QMainWindow):
         menu_layout = QHBoxLayout(self.menu_bar)
         menu_layout.setContentsMargins(10, 5, 10, 5)
         
-        # Create menu buttons
-        self.chat_button = self.create_menu_button("chat", "Chat")
+        # Create left section for screen-specific menus
+        self.screen_menu_container = QWidget()
+        screen_menu_layout = QHBoxLayout(self.screen_menu_container)
+        screen_menu_layout.setContentsMargins(0, 0, 0, 0)
+        screen_menu_layout.setSpacing(5)
+        
+        # Add left container to main menu layout
+        menu_layout.addWidget(self.screen_menu_container)
+        
+        # Add stretch to push main menu to the right
+        menu_layout.addStretch()
+        
+        # Create menu buttons - right side
         self.clock_button = self.create_menu_button("clock", "Clock")
         self.weather_button = self.create_menu_button("weather", "Weather")
         self.photos_button = self.create_menu_button("photos", "Photos")
         self.settings_button = self.create_menu_button("settings", "Settings")
+        self.chat_button = self.create_menu_button("chat", "Chat")
         
-        # Add stretch to push theme button to the right
-        menu_layout.addStretch()
+        # Add buttons directly to the menu layout (right side)
+        menu_layout.addWidget(self.clock_button)
+        menu_layout.addWidget(self.weather_button)
+        menu_layout.addWidget(self.photos_button)
+        menu_layout.addWidget(self.settings_button)
+        menu_layout.addWidget(self.chat_button)
         
         # Create theme toggle button
         self.theme_button = QPushButton()
@@ -106,8 +122,9 @@ class MainWindow(QMainWindow):
         main_layout.addWidget(self.menu_bar)
         main_layout.addWidget(self.screen_manager, 1)
         
-        # Connect screen manager theme signal
+        # Connect screen manager signals
         self.screen_manager.theme_changed.connect(self.update_theme)
+        self.screen_manager.screen_changed.connect(self.handle_screen_changed)
         
         # Connect menu buttons
         self.chat_button.clicked.connect(lambda: self.screen_manager.set_current_screen("chat"))
@@ -136,9 +153,6 @@ class MainWindow(QMainWindow):
                 background-color: rgba(128, 128, 128, 0.1);
             }
         """)
-        
-        # Add to menu layout
-        self.menu_bar.layout().addWidget(button)
         
         return button
     
@@ -192,6 +206,28 @@ class MainWindow(QMainWindow):
             self.screen_manager.start_rotation(settings["rotation_interval"] * 1000)
         else:
             self.screen_manager.stop_rotation()
+    
+    def handle_screen_changed(self, screen_name):
+        """Handle screen changes and update menu accordingly"""
+        logger.info(f"Screen changed to: {screen_name}")
+        
+        # Clear the screen menu container first
+        layout = self.screen_menu_container.layout()
+        while layout.count():
+            item = layout.takeAt(0)
+            widget = item.widget()
+            if widget:
+                widget.setParent(None)
+        
+        # If chat screen is active, move its menu to the left
+        if screen_name == "chat":
+            # Get the chat screen's top buttons and move them to our container
+            chat_top_buttons = self.chat_screen.top_buttons
+            chat_top_buttons.setParent(None)  # Remove from current parent
+            layout.addWidget(chat_top_buttons)
+        
+        # Update the UI
+        self.screen_menu_container.update()
     
     def closeEvent(self, event):
         """Handle window close event"""
