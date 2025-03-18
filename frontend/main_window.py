@@ -9,6 +9,10 @@ from frontend.config import logger
 from frontend.style import DARK_COLORS, LIGHT_COLORS, generate_main_stylesheet
 from frontend.screen_manager import ScreenManager
 from frontend.screens.chat_screen import ChatScreen
+from frontend.screens.clock_screen import ClockScreen
+from frontend.screens.weather_screen import WeatherScreen
+from frontend.screens.photos_screen import PhotosScreen
+from frontend.screens.settings_screen import SettingsScreen
 
 class MainWindow(QMainWindow):
     """
@@ -22,13 +26,17 @@ class MainWindow(QMainWindow):
         # Initialize state
         self.is_dark_mode = True
         self.colors = DARK_COLORS
-        self.is_kiosk_mode = False
+        # Always start in kiosk mode
+        self.is_kiosk_mode = True
         
         # Setup UI components
         self.setup_ui()
         
         # Initial theme setup
         self.update_theme_icon()
+        
+        # Enable kiosk mode on startup
+        self.enable_kiosk_mode()
     
     def setup_ui(self):
         """Setup the UI components"""
@@ -52,6 +60,7 @@ class MainWindow(QMainWindow):
         self.clock_button = self.create_menu_button("clock", "Clock")
         self.weather_button = self.create_menu_button("weather", "Weather")
         self.photos_button = self.create_menu_button("photos", "Photos")
+        self.settings_button = self.create_menu_button("settings", "Settings")
         
         # Add stretch to push theme button to the right
         menu_layout.addStretch()
@@ -79,10 +88,19 @@ class MainWindow(QMainWindow):
         
         # Add screens
         self.chat_screen = ChatScreen(self.colors)
+        self.clock_screen = ClockScreen(self.colors)
+        self.weather_screen = WeatherScreen(self.colors)
+        self.photos_screen = PhotosScreen(self.colors)
+        self.settings_screen = SettingsScreen(self.colors)
+        
         self.screen_manager.add_screen("chat", self.chat_screen)
+        self.screen_manager.add_screen("clock", self.clock_screen)
+        self.screen_manager.add_screen("weather", self.weather_screen)
+        self.screen_manager.add_screen("photos", self.photos_screen)
+        self.screen_manager.add_screen("settings", self.settings_screen)
         
         # Set initial screen
-        self.screen_manager.set_current_screen("chat")
+        self.screen_manager.set_current_screen("clock")
         
         # Add components to main layout
         main_layout.addWidget(self.menu_bar)
@@ -93,6 +111,13 @@ class MainWindow(QMainWindow):
         
         # Connect menu buttons
         self.chat_button.clicked.connect(lambda: self.screen_manager.set_current_screen("chat"))
+        self.clock_button.clicked.connect(lambda: self.screen_manager.set_current_screen("clock"))
+        self.weather_button.clicked.connect(lambda: self.screen_manager.set_current_screen("weather"))
+        self.photos_button.clicked.connect(lambda: self.screen_manager.set_current_screen("photos"))
+        self.settings_button.clicked.connect(lambda: self.screen_manager.set_current_screen("settings"))
+        
+        # Connect settings screen signals
+        self.settings_screen.settings_changed.connect(self.handle_settings_changed)
     
     def create_menu_button(self, icon_name, tooltip):
         """Create a menu button with the given icon and tooltip"""
@@ -144,33 +169,33 @@ class MainWindow(QMainWindow):
     def keyPressEvent(self, event):
         """Handle key press events"""
         if event.key() == Qt.Key.Key_Escape:
-            self.toggle_kiosk_mode()
+            # ESC key terminates the application
+            logger.info("ESC key pressed - terminating application")
+            self.close()
         super().keyPressEvent(event)
     
-    def toggle_kiosk_mode(self):
-        """Toggle kiosk mode"""
-        self.is_kiosk_mode = not self.is_kiosk_mode
-        
-        if self.is_kiosk_mode:
-            # Enable fullscreen
-            self.showFullScreen()
-            # Hide window frame
-            self.setWindowFlags(self.windowFlags() | Qt.WindowType.FramelessWindowHint)
-            # Hide menu bar
-            self.menu_bar.hide()
-        else:
-            # Disable fullscreen
-            self.showNormal()
-            # Restore window frame
-            self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.FramelessWindowHint)
-            # Show menu bar
-            self.menu_bar.show()
-            
+    def enable_kiosk_mode(self):
+        """Enable kiosk mode (fullscreen without window decorations)"""
+        # Enable fullscreen
+        self.showFullScreen()
+        # Hide window frame
+        self.setWindowFlags(self.windowFlags() | Qt.WindowType.FramelessWindowHint)
         # Show the window after changing flags
         self.show()
+    
+    def handle_settings_changed(self, settings):
+        """Handle settings changes from the settings screen"""
+        logger.info(f"Settings changed: {settings}")
+        
+        # Handle auto rotation setting
+        if settings["auto_rotation"]:
+            self.screen_manager.start_rotation(settings["rotation_interval"] * 1000)
+        else:
+            self.screen_manager.stop_rotation()
     
     def closeEvent(self, event):
         """Handle window close event"""
         logger.info("Closing application...")
+        # Clean up all screens
         self.chat_screen.cleanup()
         super().closeEvent(event)

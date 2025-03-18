@@ -13,7 +13,7 @@ if __name__ == '__main__':
     
     window = MainWindow()
     window.apply_styling()
-    window.show()
+    # No need to call show() as it's handled in enable_kiosk_mode()
     
     try:
         with loop:
