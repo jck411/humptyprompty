@@ -30,26 +30,62 @@ class TopButtons(QWidget):
         left_layout.setSpacing(5)
         
         # Create STT toggle button
-        self.stt_button = QPushButton("STT Off")
-        self.stt_button.setFixedSize(120, 40)
+        self.stt_button = QPushButton()
+        self.stt_button.setFixedSize(45, 45)
+        self.stt_button.setIcon(QIcon("frontend/icons/stt_off.svg"))
+        self.stt_button.setIconSize(QSize(30, 30))
         self.stt_button.setObjectName("sttButton")
         self.stt_button.setProperty("isEnabled", False)
         self.stt_button.setProperty("isListening", False)
         self.stt_button.clicked.connect(self.on_stt_toggled)
+        self.stt_button.setStyleSheet("""
+            QPushButton {
+                border: none;
+                border-radius: 20px;
+                background-color: transparent;
+            }
+            QPushButton:hover {
+                background-color: rgba(128, 128, 128, 0.1);
+            }
+        """)
         
         # Create auto-send toggle button
-        self.auto_send_button = QPushButton("AUTO Off")
-        self.auto_send_button.setFixedSize(120, 40)
+        self.auto_send_button = QPushButton()
+        self.auto_send_button.setFixedSize(45, 45)
+        self.auto_send_button.setIcon(QIcon("frontend/icons/auto_send_off.svg"))
+        self.auto_send_button.setIconSize(QSize(30, 30))
         self.auto_send_button.setObjectName("autoSendButton")
         self.auto_send_button.setProperty("isAutoSend", False)
         self.auto_send_button.clicked.connect(self.on_auto_send_toggled)
+        self.auto_send_button.setStyleSheet("""
+            QPushButton {
+                border: none;
+                border-radius: 20px;
+                background-color: transparent;
+            }
+            QPushButton:hover {
+                background-color: rgba(128, 128, 128, 0.1);
+            }
+        """)
         
         # Create TTS toggle button
-        self.tts_button = QPushButton("TTS Off")
-        self.tts_button.setFixedSize(120, 40)
+        self.tts_button = QPushButton()
+        self.tts_button.setFixedSize(45, 45)
+        self.tts_button.setIcon(QIcon("frontend/icons/sound_off.svg"))
+        self.tts_button.setIconSize(QSize(30, 30))
         self.tts_button.setObjectName("ttsButton")
         self.tts_button.setProperty("isTtsEnabled", False)
         self.tts_button.clicked.connect(self.on_tts_toggled)
+        self.tts_button.setStyleSheet("""
+            QPushButton {
+                border: none;
+                border-radius: 20px;
+                background-color: transparent;
+            }
+            QPushButton:hover {
+                background-color: rgba(128, 128, 128, 0.1);
+            }
+        """)
         
         # Add buttons to left layout
         left_layout.addWidget(self.stt_button)
@@ -168,7 +204,7 @@ class TopButtons(QWidget):
             is_enabled: Whether STT is enabled (on/off)
             is_listening: Whether STT is actively listening (red state)
         """
-        self.stt_button.setText(f"STT {'On' if is_enabled else 'Off'}")
+        self.stt_button.setIcon(QIcon(f"frontend/icons/stt_{'on' if is_enabled else 'off'}.svg"))
         self.stt_button.setProperty("isEnabled", is_enabled)
         self.stt_button.setProperty("isListening", is_listening)
         
@@ -178,7 +214,7 @@ class TopButtons(QWidget):
         # Disable Auto Send button when STT is off
         self.auto_send_button.setEnabled(is_enabled)
         if not is_enabled:
-            self.auto_send_button.setText("AUTO Off")
+            self.auto_send_button.setIcon(QIcon("frontend/icons/auto_send_off.svg"))
             self.auto_send_button.setProperty("isAutoSend", False)
         
         # Force style update
@@ -190,7 +226,7 @@ class TopButtons(QWidget):
     
     def update_tts_state(self, is_enabled):
         """Update the TTS button state"""
-        self.tts_button.setText(f"TTS {'On' if is_enabled else 'Off'}")
+        self.tts_button.setIcon(QIcon(f"frontend/icons/sound_{'on' if is_enabled else 'off'}.svg"))
         self.tts_button.setProperty("isTtsEnabled", is_enabled)
         
         # Force style update
@@ -202,7 +238,7 @@ class TopButtons(QWidget):
     
     def update_auto_send_state(self, is_enabled):
         """Update the auto-send button state"""
-        self.auto_send_button.setText(f"AUTO {'On' if is_enabled else 'Off'}")
+        self.auto_send_button.setIcon(QIcon(f"frontend/icons/auto_send_{'on' if is_enabled else 'off'}.svg"))
         self.auto_send_button.setProperty("isAutoSend", is_enabled)
         
         # Force style update
@@ -215,4 +251,4 @@ class TopButtons(QWidget):
     def update_theme_icon(self, is_dark_mode):
         """Update the theme button icon based on current theme"""
         icon_path = "frontend/icons/light_mode.svg" if is_dark_mode else "frontend/icons/dark_mode.svg"
-        self.theme_button.setIcon(QIcon(icon_path)) 
+        self.theme_button.setIcon(QIcon(icon_path))
