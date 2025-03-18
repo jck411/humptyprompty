@@ -150,20 +150,12 @@ class ChatWindow(QMainWindow):
     
     def update_ui_visibility(self, visible):
         """Update UI element visibility based on kiosk mode"""
-        # Hide/show STT, TTS, and Auto-send buttons
-        self.top_buttons.stt_button.setVisible(visible)
-        self.top_buttons.tts_button.setVisible(visible)
-        self.top_buttons.auto_send_button.setVisible(visible)
+        # Use the new TopButtons set_kiosk_mode method
+        self.top_buttons.set_kiosk_mode(not visible)
         
         # Hide/show input area and send button
         self.input_area.text_input.setVisible(visible)
         self.input_area.send_button.setVisible(visible)
-        
-        # Keep stop, clear, and theme buttons visible
-        # Note: mic button visibility is controlled by STT listening state
-        self.top_buttons.stop_button.setVisible(True)
-        self.top_buttons.clear_button.setVisible(True)
-        self.top_buttons.theme_button.setVisible(True)
     
     def closeEvent(self, event):
         """Handle window close event"""
