@@ -110,32 +110,53 @@ def generate_main_stylesheet(colors):
     }}
     """
 
-def get_message_bubble_stylesheet(is_user, colors):
+def get_message_bubble_stylesheet(is_user, colors, is_transcription=False):
+    """Get the stylesheet for message bubbles based on the current theme"""
+    user_bg_color = colors['user_bubble']
+    assistant_bg_color = colors['assistant_bubble']
+    user_text_color = colors['text_primary']
+    assistant_text_color = colors['text_primary']
+    
+    # For transcriptions, use a lighter/more transparent background
+    if is_transcription:
+        # Create a more transparent version for transcriptions
+        # This assumes the color is a hex color like "#rrggbb"
+        if user_bg_color.startswith('#') and len(user_bg_color) == 7:
+            r = int(user_bg_color[1:3], 16)
+            g = int(user_bg_color[3:5], 16)
+            b = int(user_bg_color[5:7], 16)
+            user_bg_color = f"rgba({r}, {g}, {b}, 0.6)"
+    
     if is_user:
         return f"""
-            QFrame#messageBubble {{
-                background-color: {colors['user_bubble']};
-                border-radius: 15px;
-                margin: 5px 50px 5px 5px;
-                padding: 5px;
-            }}
-            QLabel {{
-                color: {colors['text_primary']};
-                font-size: 14px;
-                background-color: transparent;
-            }}
+        QWidget {{
+            background-color: {user_bg_color};
+            border-radius: 18px;
+            margin-left: 60px;
+            margin-right: 10px;
+        }}
+        QLabel {{
+            color: {user_text_color};
+            background-color: transparent;
+            padding: 10px 15px;
+            font-size: 16px;
+            qproperty-wordWrap: true;
+        }}
         """
     else:
         return f"""
-            QFrame#messageBubble {{
-                background-color: {colors['assistant_bubble']};
-                margin: 5px 5px 5px 50px;
-                padding: 5px;
-            }}
-            QLabel {{
-                color: {colors['text_primary']};
-                font-size: 14px;
-                background-color: transparent;
-            }}
+        QWidget {{
+            background-color: {assistant_bg_color};
+            border-radius: 18px;
+            margin-left: 10px;
+            margin-right: 60px;
+        }}
+        QLabel {{
+            color: {assistant_text_color};
+            background-color: transparent;
+            padding: 10px 15px;
+            font-size: 16px;
+            qproperty-wordWrap: true;
+        }}
         """
 

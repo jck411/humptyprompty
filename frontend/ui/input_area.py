@@ -74,6 +74,11 @@ class InputArea(QWidget):
         """Clear the text input field"""
         self.text_input.clear()
     
+    def set_input_elements_visible(self, visible):
+        """Set visibility for both text input and send button"""
+        self.text_input.setVisible(visible)
+        self.send_button.setVisible(visible)
+    
     def update_colors(self, colors):
         """Update the color scheme"""
         self.colors = colors

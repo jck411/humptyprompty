@@ -65,10 +65,11 @@ class ChatScreen(BaseScreen):
         self.controller.message_received.connect(self.chat_area.update_assistant_message)
         self.controller.assistant_message_finalized.connect(self.chat_area.finalize_assistant_message)
         self.controller.connection_status_changed.connect(self.handle_connection_status)
-        self.controller.stt_state_changed.connect(self.top_buttons.update_stt_state)
+        self.controller.stt_state_changed.connect(self.handle_stt_state_change)
         self.controller.tts_state_changed.connect(self.top_buttons.update_tts_state)
         self.controller.auto_send_state_changed.connect(self.top_buttons.update_auto_send_state)
         self.controller.final_stt_text_received.connect(self.handle_stt_text)
+        self.controller.interim_stt_text_received.connect(self.handle_interim_stt_text)
         self.controller.user_message_added.connect(lambda text: self.chat_area.add_message(text, True))
     
     def handle_tts_toggle(self):
@@ -126,10 +127,31 @@ class ChatScreen(BaseScreen):
         """Handle connection status changes"""
         pass  # Not updating window title anymore, handled by main window
     
+    def handle_stt_state_change(self, is_enabled, is_listening):
+        """Handle STT state changes"""
+        # Update the top buttons
+        self.top_buttons.update_stt_state(is_enabled, is_listening)
+        
+        # Toggle text input and send button visibility based on STT state
+        self.input_area.set_input_elements_visible(not is_enabled)
+        
+    def handle_interim_stt_text(self, text):
+        """Handle interim STT text"""
+        if self.controller.stt_enabled and text.strip():
+            # Update or create an STT transcript bubble
+            self.chat_area.update_transcription(text)
+
     def handle_stt_text(self, text):
         """Handle final STT text"""
-        self.input_area.text_input.setPlainText(text)
-        self.input_area.adjust_text_input_height()
+        if self.controller.stt_enabled and text.strip():
+            # Remove any transcription bubble first
+            self.chat_area.remove_transcription_bubble()
+            
+            # For final text, just display it as a user message when auto-send is enabled
+            if not self.controller.auto_send_enabled:
+                self.input_area.text_input.setPlainText(text)
+                self.input_area.adjust_text_input_height()
+                self.send_message()
         
     def cleanup(self):
         """Clean up resources before closing"""

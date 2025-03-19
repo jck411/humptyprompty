@@ -14,6 +14,7 @@ class ChatArea(QWidget):
         super().__init__()
         self.colors = colors
         self.assistant_bubble_in_progress = None
+        self.transcription_bubble = None
         
         # Setup main widget
         self.chat_widget = QWidget()
@@ -68,9 +69,39 @@ class ChatArea(QWidget):
         self.assistant_bubble_in_progress.update_text(current_text + token)
         self.auto_scroll()
     
+    def update_transcription(self, text):
+        """Update or create the transcription bubble for STT"""
+        if not self.transcription_bubble:
+            # Create a transcription bubble with a different style
+            self.transcription_bubble = MessageBubble(text, is_user=True)
+            
+            # Add a special property to identify it as a transcription
+            self.transcription_bubble.setProperty("isTranscription", True)
+            
+            # Apply a different style for transcription (lighter color)
+            self.transcription_bubble.setStyleSheet(get_message_bubble_stylesheet(True, self.colors, is_transcription=True))
+            
+            self.chat_layout.insertWidget(self.chat_layout.count() - 1, self.transcription_bubble)
+        else:
+            # Update existing transcription bubble
+            self.transcription_bubble.update_text(text)
+        
+        self.auto_scroll()
+    
     def finalize_assistant_message(self):
         """Finalize the current assistant message"""
         self.assistant_bubble_in_progress = None
+        
+    def remove_transcription_bubble(self):
+        """Remove the transcription bubble if it exists"""
+        if self.transcription_bubble:
+            # Find and remove the transcription bubble
+            index = self.chat_layout.indexOf(self.transcription_bubble)
+            if index >= 0:
+                item = self.chat_layout.takeAt(index)
+                if item.widget():
+                    item.widget().deleteLater()
+            self.transcription_bubble = None
     
     def auto_scroll(self):
         """Automatically scroll to the bottom of the chat area"""
@@ -86,6 +117,7 @@ class ChatArea(QWidget):
                 widget.deleteLater()
         self.chat_layout.addStretch()
         self.assistant_bubble_in_progress = None
+        self.transcription_bubble = None
     
     def update_colors(self, colors):
         """Update the color scheme"""

@@ -279,17 +279,18 @@ class ChatController(QObject):
         self.connection_status_changed.emit(connected)
     
     def handle_interim_stt_text(self, text):
-        """Handle interim STT text"""
+        """Handle interim STT text updates"""
         self.interim_stt_text_received.emit(text)
     
     def handle_final_stt_text(self, text):
         """Handle final STT text"""
-        self.final_stt_text_received.emit(text)
-        
-        # If auto-send is enabled, automatically send the message
-        if self.auto_send_enabled and text.strip():
-            logger.info(f"Auto-sending message: {text}")
-            self.send_message(text)
+        # Only process if STT is enabled and text is not empty
+        if self.stt_enabled and text.strip():
+            self.final_stt_text_received.emit(text)
+            
+            # If auto-send is enabled, send the message
+            if self.auto_send_enabled:
+                self.send_message(text)
     
     def handle_frontend_stt_state(self, is_listening):
         """Handle frontend STT state changes (listening state)"""

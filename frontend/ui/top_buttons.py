@@ -15,7 +15,7 @@ class TopButtons(QWidget):
     auto_send_toggled = pyqtSignal()
     stop_clicked = pyqtSignal()
     
-    def __init__(self):
+    def __init__(self, show_theme_button=True):
         super().__init__()
         
         # Setup main layout
@@ -168,7 +168,12 @@ class TopButtons(QWidget):
         self.main_layout.addWidget(self.mic_button)
         self.main_layout.addWidget(self.stop_button)
         self.main_layout.addWidget(self.clear_button)
-        self.main_layout.addWidget(self.theme_button)
+        
+        # Only add theme button if shown
+        if show_theme_button:
+            self.main_layout.addWidget(self.theme_button)
+        else:
+            self.theme_button.setVisible(False)  # Hide if not shown
     
     def on_stt_toggled(self):
         """Handle STT button click"""
