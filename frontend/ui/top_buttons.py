@@ -32,11 +32,12 @@ class TopButtons(QWidget):
         # Create STT toggle button
         self.stt_button = QPushButton()
         self.stt_button.setFixedSize(45, 45)
-        self.stt_button.setIcon(QIcon("frontend/icons/stt_off.svg"))
+        self.stt_button.setIcon(QIcon("frontend/icons/stt_off.svg"))  # Default icon (chat)
         self.stt_button.setIconSize(QSize(30, 30))
         self.stt_button.setObjectName("sttButton")
         self.stt_button.setProperty("isEnabled", False)
         self.stt_button.setProperty("isListening", False)
+        self.stt_button.setProperty("isTextChat", False)
         self.stt_button.clicked.connect(self.on_stt_toggled)
         self.stt_button.setStyleSheet("""
             QPushButton {
@@ -201,17 +202,27 @@ class TopButtons(QWidget):
         """Handle stop button click"""
         self.stop_clicked.emit()
     
-    def update_stt_state(self, is_enabled, is_listening=False):
+    def update_stt_state(self, is_enabled, is_listening=False, is_text_chat=False):
         """
         Update the STT button state
         
         Args:
             is_enabled: Whether STT is enabled (on/off)
             is_listening: Whether STT is actively listening (red state)
+            is_text_chat: Whether text chat mode is enabled
         """
-        self.stt_button.setIcon(QIcon(f"frontend/icons/stt_{'on' if is_enabled else 'off'}.svg"))
+        # Set the appropriate icon
+        if is_enabled:
+            self.stt_button.setIcon(QIcon("frontend/icons/stt_on.svg"))
+        elif is_text_chat:
+            self.stt_button.setIcon(QIcon("frontend/icons/text_chat.svg"))  # Use text_chat icon for text chat mode
+        else:
+            self.stt_button.setIcon(QIcon("frontend/icons/stt_off.svg"))  # Default icon (chat)
+        
+        # Update properties
         self.stt_button.setProperty("isEnabled", is_enabled)
         self.stt_button.setProperty("isListening", is_listening)
+        self.stt_button.setProperty("isTextChat", is_text_chat)
         
         # Show/hide mic icon based on listening state
         self.mic_button.setVisible(is_listening)

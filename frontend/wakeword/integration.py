@@ -102,7 +102,7 @@ class WakeWordManager(QObject):
                 # Only activate STT if it's not already active
                 if not self.chat_controller.frontend_stt.is_enabled:
                     logger.info("Activating STT based on wake word detection")
-                    self.chat_controller.toggle_stt()
+                    self.chat_controller.toggle_stt(from_wake_word=True)
                     
                     # Also enable auto-send mode
                     if not self.chat_controller.auto_send_enabled:

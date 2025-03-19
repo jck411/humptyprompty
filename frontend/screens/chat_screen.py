@@ -127,13 +127,14 @@ class ChatScreen(BaseScreen):
         """Handle connection status changes"""
         pass  # Not updating window title anymore, handled by main window
     
-    def handle_stt_state_change(self, is_enabled, is_listening):
+    def handle_stt_state_change(self, is_enabled, is_listening, is_text_chat):
         """Handle STT state changes"""
         # Update the top buttons
-        self.top_buttons.update_stt_state(is_enabled, is_listening)
+        self.top_buttons.update_stt_state(is_enabled, is_listening, is_text_chat)
         
-        # Toggle text input and send button visibility based on STT state
-        self.input_area.set_input_elements_visible(not is_enabled)
+        # Control input area visibility based on mode
+        # Show input elements only in text chat mode
+        self.input_area.set_input_elements_visible(is_text_chat)
         
     def handle_interim_stt_text(self, text):
         """Handle interim STT text"""

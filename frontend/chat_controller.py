@@ -20,7 +20,7 @@ class ChatController(QObject):
     message_received = pyqtSignal(str)
     assistant_message_finalized = pyqtSignal()
     connection_status_changed = pyqtSignal(bool)
-    stt_state_changed = pyqtSignal(bool, bool)  # is_enabled, is_listening
+    stt_state_changed = pyqtSignal(bool, bool, bool)  # is_enabled, is_listening, is_text_chat
     tts_state_changed = pyqtSignal(bool)
     auto_send_state_changed = pyqtSignal(bool)
     interim_stt_text_received = pyqtSignal(str)
@@ -43,6 +43,7 @@ class ChatController(QObject):
         self.is_toggling_stt = False
         self.is_toggling_tts = False
         self.wake_word_enabled = WAKEWORD_CONFIG.get('enabled', False)
+        self.text_chat_enabled = False  # New state for text chat mode
         
         # Initialize components
         self.audio_manager = AudioManager()
@@ -120,8 +121,8 @@ class ChatController(QObject):
             
         # Always use the local STT configuration
         self.stt_enabled = STT_CONFIG.get('enabled', False)
-        self.stt_state_changed.emit(self.stt_enabled, self.stt_listening)
-        logger.info(f"Using local STT configuration: enabled={self.stt_enabled}")
+        self.stt_state_changed.emit(self.stt_enabled, self.stt_listening, self.text_chat_enabled)
+        logger.info(f"Using local STT configuration: enabled={self.stt_enabled}, text_chat={self.text_chat_enabled}")
             
         # Reset toggle flags
         self.is_toggling_tts = False
@@ -233,7 +234,7 @@ class ChatController(QObject):
             # Ensure STT state is correctly reflected in UI
             if self.stt_enabled:
                 logger.info("Re-emitting STT state to ensure UI synchronization")
-                self.stt_state_changed.emit(self.stt_enabled, self.stt_listening)
+                self.stt_state_changed.emit(self.stt_enabled, self.stt_listening, self.text_chat_enabled)
             
             # Finalize the current assistant message
             self.finalize_assistant_message()
@@ -254,7 +255,7 @@ class ChatController(QObject):
                 logger.info("Reset WebSocketClient message history after stopping generation")
             
             # Final state check to ensure everything is synchronized
-            logger.info(f"Stop operation completed. STT enabled: {self.stt_enabled}, STT listening: {self.stt_listening}")
+            logger.info(f"Stop operation completed. STT enabled: {self.stt_enabled}, STT listening: {self.stt_listening}, text_chat: {self.text_chat_enabled}")
             
             # Important: If STT is enabled but not listening, restart it
             # This ensures STT returns to listening state after stopping
@@ -295,37 +296,67 @@ class ChatController(QObject):
     def handle_frontend_stt_state(self, is_listening):
         """Handle frontend STT state changes (listening state)"""
         self.stt_listening = is_listening
-        self.stt_state_changed.emit(self.stt_enabled, is_listening)
+        self.stt_state_changed.emit(self.stt_enabled, is_listening, self.text_chat_enabled)
         
         if not is_listening:
-            # Reset interim text when STT is stopped
-            self.interim_stt_text_received.emit("")
-        
-        logger.info(f"STT listening state changed to: {'listening' if is_listening else 'not listening'}")
+            logger.debug("STT is no longer listening")
     
     def handle_frontend_stt_enabled(self, is_enabled):
         """Handle frontend STT enabled state changes"""
         self.stt_enabled = is_enabled
-        self.stt_state_changed.emit(is_enabled, self.stt_listening)
+        self.stt_state_changed.emit(is_enabled, self.stt_listening, self.text_chat_enabled)
         
         # If STT is turned off, also turn off Auto Send
         if not is_enabled and self.auto_send_enabled:
             self.auto_send_enabled = False
             self.auto_send_state_changed.emit(False)
-            logger.info("Auto-send disabled because STT was turned off")
         
         logger.info(f"STT enabled state changed to: {'enabled' if is_enabled else 'disabled'}")
     
-    def toggle_stt(self):
-        """Toggle STT mode"""
+    def toggle_stt(self, from_wake_word=False):
+        """Toggle through three states: OFF -> TEXT_CHAT -> STT ON -> OFF"""
         if self.is_toggling_stt:
             return
             
         self.is_toggling_stt = True
+        
         try:
-            # Use the toggle method from DeepgramSTT
-            self.frontend_stt.toggle()
-            logger.info(f"STT toggled, current state: {self.frontend_stt.is_enabled}")
+            # If activated by wake word, go straight to STT ON state
+            if from_wake_word:
+                self.text_chat_enabled = False
+                self.stt_enabled = True
+                # Start STT using the existing toggle method
+                if not self.frontend_stt.is_enabled:
+                    self.frontend_stt.toggle()
+            else:
+                # Normal cycling: OFF -> TEXT_CHAT -> ON -> OFF
+                if not self.stt_enabled and not self.text_chat_enabled:
+                    # Currently OFF, switch to TEXT_CHAT
+                    self.text_chat_enabled = True
+                    self.stt_enabled = False
+                elif self.text_chat_enabled and not self.stt_enabled:
+                    # Currently TEXT_CHAT, switch to STT ON
+                    self.text_chat_enabled = False
+                    self.stt_enabled = True
+                    # Start STT using the existing toggle method
+                    if not self.frontend_stt.is_enabled:
+                        self.frontend_stt.toggle()
+                else:
+                    # Currently STT ON, switch to OFF
+                    self.stt_enabled = False
+                    self.text_chat_enabled = False
+                    # Stop STT if it's running
+                    if self.frontend_stt.is_enabled:
+                        self.frontend_stt.toggle()
+                
+            # Update listening state based on stt_enabled 
+            # (frontend_stt might not have is_listening attribute)
+            self.stt_listening = self.stt_enabled
+                
+            # Emit signal with updated states
+            self.stt_state_changed.emit(self.stt_enabled, self.stt_listening, self.text_chat_enabled)
+            
+            logger.info(f"STT toggled to: enabled={self.stt_enabled}, listening={self.stt_listening}, text_chat={self.text_chat_enabled}")
         except Exception as e:
             logger.error(f"Error toggling STT: {e}")
         finally:
