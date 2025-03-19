@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-from PyQt6.QtWidgets import QWidget, QHBoxLayout, QPushButton
-from PyQt6.QtCore import pyqtSignal, QSize
+from PyQt6.QtWidgets import QWidget, QHBoxLayout, QPushButton, QToolBar
+from PyQt6.QtCore import pyqtSignal, QSize, Qt
 from PyQt6.QtGui import QIcon
 
 class TopButtons(QWidget):
@@ -18,154 +18,58 @@ class TopButtons(QWidget):
     def __init__(self, show_theme_button=True):
         super().__init__()
         
-        # Setup main layout
+        # Common button style
+        self.button_style = """
+            QPushButton {
+                border: none;
+                border-radius: 20px;
+                background-color: transparent;
+            }
+            QPushButton:hover {
+                background-color: rgba(128, 128, 128, 0.1);
+            }
+        """
+        
+        # Setup main layout - use QHBoxLayout with fixed alignment
         self.main_layout = QHBoxLayout(self)
         self.main_layout.setContentsMargins(0, 5, 0, 0)
         self.main_layout.setSpacing(5)
         
-        # Create left buttons container
-        left_buttons = QWidget()
-        left_layout = QHBoxLayout(left_buttons)
-        left_layout.setContentsMargins(0, 0, 0, 0)
-        left_layout.setSpacing(5)
-        
-        # Create STT toggle button
-        self.stt_button = QPushButton()
-        self.stt_button.setFixedSize(45, 45)
-        self.stt_button.setIcon(QIcon("frontend/icons/stt_off.svg"))  # Default icon (chat)
-        self.stt_button.setIconSize(QSize(30, 30))
-        self.stt_button.setObjectName("sttButton")
+        # Create screen-specific buttons
+        self.stt_button = self.create_button("stt_off.svg", 30, "sttButton")
         self.stt_button.setProperty("isEnabled", False)
         self.stt_button.setProperty("isListening", False)
         self.stt_button.setProperty("isTextChat", False)
         self.stt_button.clicked.connect(self.on_stt_toggled)
-        self.stt_button.setStyleSheet("""
-            QPushButton {
-                border: none;
-                border-radius: 20px;
-                background-color: transparent;
-            }
-            QPushButton:hover {
-                background-color: rgba(128, 128, 128, 0.1);
-            }
-        """)
         
-        # Create auto-send toggle button
-        self.auto_send_button = QPushButton()
-        self.auto_send_button.setFixedSize(45, 45)
-        self.auto_send_button.setIcon(QIcon("frontend/icons/auto_send_off.svg"))
-        self.auto_send_button.setIconSize(QSize(30, 30))
-        self.auto_send_button.setObjectName("autoSendButton")
+        self.auto_send_button = self.create_button("auto_send_off.svg", 30, "autoSendButton")
         self.auto_send_button.setProperty("isAutoSend", False)
         self.auto_send_button.clicked.connect(self.on_auto_send_toggled)
-        self.auto_send_button.setStyleSheet("""
-            QPushButton {
-                border: none;
-                border-radius: 20px;
-                background-color: transparent;
-            }
-            QPushButton:hover {
-                background-color: rgba(128, 128, 128, 0.1);
-            }
-        """)
         
-        # Create TTS toggle button
-        self.tts_button = QPushButton()
-        self.tts_button.setFixedSize(45, 45)
-        self.tts_button.setIcon(QIcon("frontend/icons/sound_off.svg"))
-        self.tts_button.setIconSize(QSize(30, 30))
-        self.tts_button.setObjectName("ttsButton")
+        self.tts_button = self.create_button("sound_off.svg", 30, "ttsButton")
         self.tts_button.setProperty("isTtsEnabled", False)
         self.tts_button.clicked.connect(self.on_tts_toggled)
-        self.tts_button.setStyleSheet("""
-            QPushButton {
-                border: none;
-                border-radius: 20px;
-                background-color: transparent;
-            }
-            QPushButton:hover {
-                background-color: rgba(128, 128, 128, 0.1);
-            }
-        """)
-        
-        # Add buttons to left layout
-        left_layout.addWidget(self.stt_button)
-        left_layout.addWidget(self.auto_send_button)
-        left_layout.addWidget(self.tts_button)
-        left_layout.addStretch()
-        
-        # Add left buttons to main layout
-        self.main_layout.addWidget(left_buttons, stretch=1)
         
         # Create mic indicator button (only visible when listening)
-        self.mic_button = QPushButton()
-        self.mic_button.setFixedSize(45, 45)
-        self.mic_button.setIcon(QIcon("frontend/icons/mic.svg"))
-        self.mic_button.setIconSize(QSize(30, 30))
-        self.mic_button.setStyleSheet("""
-            QPushButton {
-                border: none;
-                border-radius: 20px;
-                background-color: transparent;
-            }
-            QPushButton:hover {
-                background-color: rgba(128, 128, 128, 0.1);
-            }
-        """)
+        self.mic_button = self.create_button("mic.svg", 30)
         self.mic_button.setVisible(False)  # Initially hidden
         
         # Create stop button
-        self.stop_button = QPushButton()
-        self.stop_button.setFixedSize(45, 45)
-        self.stop_button.setIcon(QIcon("frontend/icons/stop_all.svg"))
-        self.stop_button.setIconSize(QSize(30, 30))
+        self.stop_button = self.create_button("stop_all.svg", 30)
         self.stop_button.clicked.connect(self.on_stop_clicked)
-        self.stop_button.setStyleSheet("""
-            QPushButton {
-                border: none;
-                border-radius: 20px;
-                background-color: transparent;
-            }
-            QPushButton:hover {
-                background-color: rgba(128, 128, 128, 0.1);
-            }
-        """)
         
         # Create clear chat button
-        self.clear_button = QPushButton()
-        self.clear_button.setFixedSize(45, 45)
-        self.clear_button.setIcon(QIcon("frontend/icons/clear_all.svg"))
-        self.clear_button.setIconSize(QSize(30, 30))
+        self.clear_button = self.create_button("clear_all.svg", 30)
         self.clear_button.clicked.connect(self.on_clear_clicked)
-        self.clear_button.setStyleSheet("""
-            QPushButton {
-                border: none;
-                border-radius: 20px;
-                background-color: transparent;
-            }
-            QPushButton:hover {
-                background-color: rgba(128, 128, 128, 0.1);
-            }
-        """)
         
         # Create theme toggle button
-        self.theme_button = QPushButton()
-        self.theme_button.setFixedSize(45, 45)
-        self.theme_button.setIcon(QIcon("frontend/icons/dark_mode.svg"))
-        self.theme_button.setIconSize(QSize(35, 35))
+        self.theme_button = self.create_button("dark_mode.svg", 35)
         self.theme_button.clicked.connect(self.on_theme_toggled)
-        self.theme_button.setStyleSheet("""
-            QPushButton {
-                border: none;
-                border-radius: 20px;
-                background-color: transparent;
-            }
-            QPushButton:hover {
-                background-color: rgba(128, 128, 128, 0.1);
-            }
-        """)
         
-        # Add stop and theme buttons to main layout
+        # Add buttons to main layout
+        self.main_layout.addWidget(self.stt_button)
+        self.main_layout.addWidget(self.auto_send_button)
+        self.main_layout.addWidget(self.tts_button)
         self.main_layout.addWidget(self.mic_button)
         self.main_layout.addWidget(self.stop_button)
         self.main_layout.addWidget(self.clear_button)
@@ -175,6 +79,20 @@ class TopButtons(QWidget):
             self.main_layout.addWidget(self.theme_button)
         else:
             self.theme_button.setVisible(False)  # Hide if not shown
+            
+        # Add stretch to push everything to the left
+        self.main_layout.addStretch(1)
+    
+    def create_button(self, icon_name, icon_size, object_name=None):
+        """Helper method to create buttons with consistent styling"""
+        button = QPushButton()
+        button.setFixedSize(45, 45)
+        button.setIcon(QIcon(f"frontend/icons/{icon_name}"))
+        button.setIconSize(QSize(icon_size, icon_size))
+        if object_name:
+            button.setObjectName(object_name)
+        button.setStyleSheet(self.button_style)
+        return button
     
     def on_stt_toggled(self):
         """Handle STT button click"""

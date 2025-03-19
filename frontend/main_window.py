@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import sys
 import asyncio
-from PyQt6.QtWidgets import QMainWindow, QWidget, QHBoxLayout, QPushButton, QVBoxLayout
+from PyQt6.QtWidgets import QMainWindow, QWidget, QHBoxLayout, QPushButton, QVBoxLayout, QToolBar, QSizePolicy
 from PyQt6.QtCore import Qt, QSize
 from PyQt6.QtGui import QIcon
 
@@ -49,23 +49,31 @@ class MainWindow(QMainWindow):
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
         
-        # Create menu bar
-        self.menu_bar = QWidget()
-        self.menu_bar.setFixedHeight(50)
-        menu_layout = QHBoxLayout(self.menu_bar)
-        menu_layout.setContentsMargins(10, 5, 10, 5)
+        # Create top toolbar
+        self.toolbar = QToolBar()
+        self.toolbar.setMovable(False)
+        self.toolbar.setFloatable(False)
+        self.toolbar.setFixedHeight(50)
+        self.toolbar.setStyleSheet("""
+            QToolBar {
+                spacing: 5px;
+                border: none;
+            }
+        """)
         
-        # Create left section for screen-specific menus
+        # Create screen menu container for left side
         self.screen_menu_container = QWidget()
         screen_menu_layout = QHBoxLayout(self.screen_menu_container)
-        screen_menu_layout.setContentsMargins(0, 0, 0, 0)
+        screen_menu_layout.setContentsMargins(10, 0, 0, 0)
         screen_menu_layout.setSpacing(5)
+        screen_menu_layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         
-        # Add left container to main menu layout
-        menu_layout.addWidget(self.screen_menu_container)
-        
-        # Add stretch to push main menu to the right
-        menu_layout.addStretch()
+        # Create main menu container for right side
+        self.main_menu_container = QWidget()
+        main_menu_layout = QHBoxLayout(self.main_menu_container)
+        main_menu_layout.setContentsMargins(0, 0, 10, 0)
+        main_menu_layout.setSpacing(5)
+        main_menu_layout.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         
         # Create menu buttons - right side
         self.clock_button = self.create_menu_button("clock", "Clock")
@@ -74,12 +82,12 @@ class MainWindow(QMainWindow):
         self.settings_button = self.create_menu_button("settings", "Settings")
         self.chat_button = self.create_menu_button("chat", "Chat")
         
-        # Add buttons directly to the menu layout (right side)
-        menu_layout.addWidget(self.clock_button)
-        menu_layout.addWidget(self.weather_button)
-        menu_layout.addWidget(self.photos_button)
-        menu_layout.addWidget(self.settings_button)
-        menu_layout.addWidget(self.chat_button)
+        # Add buttons to main menu layout (right side)
+        main_menu_layout.addWidget(self.clock_button)
+        main_menu_layout.addWidget(self.weather_button)
+        main_menu_layout.addWidget(self.photos_button)
+        main_menu_layout.addWidget(self.settings_button)
+        main_menu_layout.addWidget(self.chat_button)
         
         # Create theme toggle button
         self.theme_button = QPushButton()
@@ -97,7 +105,14 @@ class MainWindow(QMainWindow):
                 background-color: rgba(128, 128, 128, 0.1);
             }
         """)
-        menu_layout.addWidget(self.theme_button)
+        main_menu_layout.addWidget(self.theme_button)
+        
+        # Add containers to toolbar
+        self.toolbar.addWidget(self.screen_menu_container)
+        spacer = QWidget()
+        spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self.toolbar.addWidget(spacer)
+        self.toolbar.addWidget(self.main_menu_container)
         
         # Create screen manager
         self.screen_manager = ScreenManager(self.colors)
@@ -119,7 +134,7 @@ class MainWindow(QMainWindow):
         self.screen_manager.set_current_screen("clock")
         
         # Add components to main layout
-        main_layout.addWidget(self.menu_bar)
+        main_layout.addWidget(self.toolbar)
         main_layout.addWidget(self.screen_manager, 1)
         
         # Connect screen manager signals
@@ -190,12 +205,12 @@ class MainWindow(QMainWindow):
     
     def enable_kiosk_mode(self):
         """Enable kiosk mode (fullscreen without window decorations)"""
-        # Enable fullscreen
-        self.showFullScreen()
-        # Hide window frame
+        # Hide window frame first
         self.setWindowFlags(self.windowFlags() | Qt.WindowType.FramelessWindowHint)
         # Show the window after changing flags
         self.show()
+        # Enable fullscreen - must be called after show() to ensure it takes effect immediately
+        self.showFullScreen()
     
     def handle_settings_changed(self, settings):
         """Handle settings changes from the settings screen"""
@@ -223,8 +238,16 @@ class MainWindow(QMainWindow):
         if screen_name == "chat":
             # Get the chat screen's top buttons and move them to our container
             chat_top_buttons = self.chat_screen.top_buttons
-            chat_top_buttons.setParent(None)  # Remove from current parent
+            
+            # Ensure it's not already in another layout
+            if chat_top_buttons.parent() is not None:
+                chat_top_buttons.setParent(None)
+                
+            # Add to our container
             layout.addWidget(chat_top_buttons)
+            
+            # Make sure the chat screen knows its top buttons have been moved
+            self.chat_screen.top_buttons_moved = True
         
         # Update the UI
         self.screen_menu_container.update()

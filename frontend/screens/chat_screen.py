@@ -18,6 +18,7 @@ class ChatScreen(BaseScreen):
         
         # Initialize state
         self.is_dark_mode = True
+        self.top_buttons_moved = False
         
         # Create controller
         self.controller = ChatController()
@@ -100,10 +101,11 @@ class ChatScreen(BaseScreen):
     def deactivate(self):
         """Clean up when the screen is hidden"""
         # Ensure top_buttons is back in our layout when screen is hidden
-        if self.top_buttons.parent() != self:
+        if self.top_buttons_moved and self.top_buttons.parent() != self:
             # If top_buttons has been moved elsewhere, bring it back
             self.top_buttons.setParent(None)
             self.main_layout.insertWidget(0, self.top_buttons)
+            self.top_buttons_moved = False
         
     def update_colors(self, colors):
         """Update the color scheme"""
