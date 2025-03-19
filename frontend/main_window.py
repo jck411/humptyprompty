@@ -198,9 +198,13 @@ class MainWindow(QMainWindow):
     def keyPressEvent(self, event):
         """Handle key press events"""
         if event.key() == Qt.Key.Key_Escape:
-            # ESC key terminates the application
-            logger.info("ESC key pressed - terminating application")
-            self.close()
+            # ESC key toggles between fullscreen and normal window
+            if self.isFullScreen():
+                logger.info("ESC key pressed - minimizing to normal window")
+                self.showNormal()
+            else:
+                logger.info("ESC key pressed - returning to fullscreen")
+                self.showFullScreen()
         super().keyPressEvent(event)
     
     def enable_kiosk_mode(self):
