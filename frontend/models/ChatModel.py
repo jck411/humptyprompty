@@ -3,6 +3,7 @@ from PySide6.QtCore import QObject, Signal, Slot, Property, QUrl, QTimer
 from PySide6.QtWebSockets import QWebSocket
 from PySide6.QtNetwork import QAbstractSocket
 from frontend.config import logger
+from frontend.stt.config import STT_CONFIG
 
 class ChatModel(QObject):
     """
@@ -33,8 +34,8 @@ class ChatModel(QObject):
         # Message history
         self.messages = []
         
-        # State tracking
-        self._stt_active = False
+        # State tracking - initialize STT active state from config
+        self._stt_active = STT_CONFIG.get('enabled', False)
         self._tts_active = True
         self._is_connected = False
         
@@ -53,7 +54,7 @@ class ChatModel(QObject):
         self.reconnect_timer.timeout.connect(self._reconnect_timeout)
         self.reconnect_timer.setSingleShot(True)
         
-        logger.info("ChatModel initialized")
+        logger.info(f"ChatModel initialized (STT active: {self._stt_active})")
         
     @Slot(str)
     def connectToServer(self, server_url):
@@ -125,7 +126,7 @@ class ChatModel(QObject):
         
         # Emit the signal with the new state
         self.sttStateChanged.emit(new_state)
-        logger.info(f"STT toggled to: {new_state}")
+        logger.info(f"ChatModel STT toggled to: {new_state}")
         return new_state
     
     @Slot()

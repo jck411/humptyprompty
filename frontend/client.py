@@ -63,8 +63,17 @@ class SttBridge(QObject):
     def toggle(self):
         """Toggle STT state"""
         if self.stt:
-            self.stt.toggle()
-            logger.info("STT toggled")
+            # Get the current state and toggle to the opposite
+            current_state = self.stt.is_enabled
+            new_state = not current_state
+            
+            # Force the toggle to work even if there's a pending operation
+            if hasattr(self.stt, '_is_toggling'):
+                self.stt._is_toggling = False
+                
+            # Set the new state
+            self.stt.set_enabled(new_state)
+            logger.info(f"STT toggle requested: {current_state} -> {new_state}")
     
     @Slot(bool)
     def set_enabled(self, enabled):
@@ -114,12 +123,42 @@ class QmlBridge(QObject):
         self.chat_model.sttStateChanged.connect(self.stt_bridge.set_enabled)
         self.stt_bridge.textReceived.connect(self.chat_model.sendMessage)
         
+        # Connect audio playback state to STT pause/resume
+        # When audio starts playing, pause STT if it's enabled
+        # When audio stops playing, resume STT if it was enabled
+        self.audio_manager.playbackStateChanged.connect(self.handle_audio_playback_state)
+        
+        # Track STT state for pause/resume during TTS
+        self._stt_was_enabled = False
+        
         # Sync initial STT state if available
         if self.stt_bridge.stt:
             self.chat_model._stt_active = self.stt_bridge.stt.is_enabled
             logger.info(f"Initialized ChatModel STT state to: {self.stt_bridge.stt.is_enabled}")
         
         return self.chat_model
+    
+    @Slot(bool)
+    def handle_audio_playback_state(self, is_playing):
+        """Handle audio playback state changes for STT pause/resume"""
+        if not self.stt_bridge.stt:
+            return
+            
+        if is_playing:
+            # Audio started playing - pause STT if it's enabled
+            if self.stt_bridge.stt.is_enabled:
+                # Remember that STT was enabled
+                self._stt_was_enabled = True
+                # Pause STT using keepalive mode
+                logger.info("Audio playback started - pausing STT")
+                self.stt_bridge.stt.set_paused(True)
+        else:
+            # Audio stopped playing - resume STT if it was enabled before
+            if self._stt_was_enabled and self.stt_bridge.stt.is_enabled:
+                # Resume STT
+                logger.info("Audio playback stopped - resuming STT")
+                self.stt_bridge.stt.set_paused(False)
+                self._stt_was_enabled = False
     
     @Slot()
     def cleanup(self):

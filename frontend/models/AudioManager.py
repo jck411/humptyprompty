@@ -90,10 +90,14 @@ class AudioManager(QObject):
     # Signals
     stateChanged = Signal(int)  # Audio state changed (playing, stopped, etc)
     
+    # Signal to notify when audio playback starts/stops
+    playbackStateChanged = Signal(bool)
+    
     def __init__(self, parent=None):
         super().__init__(parent)
         self.audio_sink = None
         self.audio_device = None
+        self.is_playing = False
         self.setup_audio()
         logger.info("AudioManager initialized")
         
@@ -156,6 +160,9 @@ class AudioManager(QObject):
             if data == b'audio:' or len(data) == 0:
                 logger.debug("Received empty audio, marking end-of-stream")
                 self.audio_device.mark_end_of_stream()
+                
+                # Update playback state - audio has stopped
+                self.update_playback_state(False)
                 return False
             
             # Extract audio data if it has the audio: prefix
@@ -167,6 +174,9 @@ class AudioManager(QObject):
             if len(audio_data) == 0:
                 logger.debug("Empty audio data after prefix, marking end-of-stream")
                 self.audio_device.mark_end_of_stream()
+                
+                # Update playback state - audio has stopped
+                self.update_playback_state(False)
                 return False
                 
             # If audio sink is not active, restart it
@@ -181,10 +191,19 @@ class AudioManager(QObject):
             if len(audio_data) > 1000:
                 logger.debug(f"Wrote {bytes_written} bytes to audio buffer")
             
+            # Update playback state - audio is playing
+            self.update_playback_state(True)
             return True  # More audio
         except Exception as e:
             logger.error(f"Error processing audio data: {e}")
             return False
+            
+    def update_playback_state(self, is_playing):
+        """Update the playback state and emit signal if changed"""
+        if self.is_playing != is_playing:
+            self.is_playing = is_playing
+            logger.info(f"Audio playback state changed to: {'playing' if is_playing else 'stopped'}")
+            self.playbackStateChanged.emit(is_playing)
     
     def restart_audio_sink(self):
         """Restart the audio sink with a fresh device"""

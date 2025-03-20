@@ -77,9 +77,19 @@ class DeepgramSTT(QObject):
         logger.debug(f"STT config: {STT_CONFIG}")
         logger.debug(f"Deepgram config: {DEEPGRAM_CONFIG}")
 
-        # Auto-start if configured
-        if STT_CONFIG['auto_start'] and self.is_enabled:
-            self.set_enabled(True)
+        # Initialize STT based on the enabled setting
+        if STT_CONFIG['enabled']:
+            # If enabled is True in config, start STT
+            logger.info("Starting STT (enabled=True in config)")
+            # Ensure the internal state is correct
+            self.is_enabled = True
+            # Start the service directly
+            self._is_toggling = False  # Ensure no toggle lock
+            self._start_task = asyncio.run_coroutine_threadsafe(self._async_start(), self.dg_loop)
+        else:
+            # If enabled is False in config, initialize with it off
+            logger.info("Initializing STT with enabled=False")
+            self.is_enabled = False
 
     def _run_dg_loop(self):
         """Run the asyncio event loop in a separate thread"""
@@ -387,7 +397,16 @@ class DeepgramSTT(QObject):
     def toggle(self):
         """Toggle STT enabled state"""
         try:
-            self.set_enabled(not self.is_enabled)
+            # Get current state and explicitly set to the opposite
+            current_state = self.is_enabled
+            new_state = not current_state
+            
+            # Force toggling even if there's a pending operation
+            self._is_toggling = False
+            
+            # Set the new state
+            self.set_enabled(new_state)
+            logger.info(f"STT toggle requested: {current_state} -> {new_state}")
         except Exception as e:
             logger.error(f"Error toggling STT: {e}")
             # Ensure UI is updated even if there's an error

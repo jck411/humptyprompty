@@ -20,7 +20,7 @@ Item {
     property var chatModel
     
     // State properties
-    property bool isSttActive: false
+    property bool isSttActive: chatModel ? chatModel.sttActive : false
     property bool isTtsActive: true
     property bool isConnected: false
     property string connectionStatus: isConnected ? "Connected" : "Disconnected"
@@ -63,6 +63,10 @@ Item {
         
         // Update the connection status
         isConnected = chatModel.isConnected;
+        
+        // Update STT state from ChatModel (this is the key change)
+        isSttActive = chatModel.sttActive;
+        console.log("Initial STT state set to: " + isSttActive);
         
         // If not connected, try to reconnect
         if (!chatModel.isConnected) {
