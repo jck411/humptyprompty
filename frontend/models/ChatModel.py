@@ -1,12 +1,17 @@
 import json
-import asyncio
-import logging
 from PySide6.QtCore import QObject, Signal, Slot, Property, QUrl, QTimer
 from PySide6.QtWebSockets import QWebSocket
 from PySide6.QtNetwork import QAbstractSocket
+from frontend.config import logger
 
 class ChatModel(QObject):
-    # Signals to communicate with QML
+    """
+    Manages chat communication with the backend server via WebSocket.
+    
+    Handles sending/receiving messages, audio data, and state management
+    for the chat interface.
+    """
+    # Signals to communicate with QML and other components
     messageReceived = Signal(str)
     assistantMessageInProgress = Signal(str)
     sttStateChanged = Signal(bool)
@@ -43,10 +48,17 @@ class ChatModel(QObject):
         # Store the last server URL for reconnection
         self.last_server_url = None
         
+        # Reconnection timer
+        self.reconnect_timer = QTimer(self)
+        self.reconnect_timer.timeout.connect(self._reconnect_timeout)
+        self.reconnect_timer.setSingleShot(True)
+        
+        logger.info("ChatModel initialized")
+        
     @Slot(str)
     def connectToServer(self, server_url):
         """Connect to the WebSocket server"""
-        logging.info(f"Connecting to WebSocket server at {server_url}")
+        logger.info(f"Connecting to WebSocket server at {server_url}")
         
         # Store the server URL for reconnection
         self.last_server_url = server_url
@@ -57,6 +69,10 @@ class ChatModel(QObject):
     @Slot(str)
     def sendMessage(self, message):
         """Send a message to the server"""
+        if not message.strip():
+            logger.debug("Ignoring empty message")
+            return
+            
         if self.ws.state() == QAbstractSocket.SocketState.ConnectedState:
             # Reset the current assistant message for the new conversation turn
             self.current_assistant_message = ""
@@ -71,13 +87,13 @@ class ChatModel(QObject):
                 "messages": self.messages
             })
             self.ws.sendTextMessage(payload)
-            logging.debug(f"Sent message: {message}")
+            logger.debug(f"Sent message: {message}")
             
             # Emit signal for the UI to display the user message
             # This is necessary for STT-generated messages to appear in the chat
             self.messageReceived.emit(message)
         else:
-            logging.error("Cannot send message: WebSocket not connected")
+            logger.error("Cannot send message: WebSocket not connected")
             # Try to reconnect
             self.reconnect()
     
@@ -87,7 +103,7 @@ class ChatModel(QObject):
         self.messages.clear()
         self.current_assistant_message = ""
         self.is_new_message = True
-        logging.info("Chat history cleared")
+        logger.info("Chat history cleared")
         
     @Slot(result="QVariantList")
     def getMessageHistory(self):
@@ -109,74 +125,69 @@ class ChatModel(QObject):
         
         # Emit the signal with the new state
         self.sttStateChanged.emit(new_state)
-        logging.info(f"STT toggled to: {new_state}")
-        return new_state  # Return the new state in case it's needed
+        logger.info(f"STT toggled to: {new_state}")
+        return new_state
     
     @Slot()
     def toggleTts(self):
         """Toggle TTS state on the server"""
-        # This will send a request to the server to toggle TTS
         if self.ws.state() == QAbstractSocket.SocketState.ConnectedState:
             payload = json.dumps({"action": "toggle-tts"})
             self.ws.sendTextMessage(payload)
-            logging.info("Sent TTS toggle request to server")
+            logger.info("Sent TTS toggle request to server")
         else:
-            logging.error("Cannot toggle TTS: WebSocket not connected")
-            # Try to reconnect
+            logger.error("Cannot toggle TTS: WebSocket not connected")
             self.reconnect()
     
     @Slot()
     def stopGeneration(self):
         """Stop text generation and audio playback"""
         if self.ws.state() == QAbstractSocket.SocketState.ConnectedState:
-            stop_gen_payload = json.dumps({"action": "stop-generation"})
-            stop_audio_payload = json.dumps({"action": "stop-audio"})
-            
-            self.ws.sendTextMessage(stop_gen_payload)
-            self.ws.sendTextMessage(stop_audio_payload)
-            logging.info("Sent stop generation and audio requests")
+            # Send both stop requests in a single message to reduce network traffic
+            payload = json.dumps({
+                "action": "stop-all",
+                "stop_generation": True,
+                "stop_audio": True
+            })
+            self.ws.sendTextMessage(payload)
+            logger.info("Sent stop-all request")
             
             # Emit signal to notify QML that audio stopped
             self.audioReceived.emit(b'audio:')  # Empty audio to mark end of stream
         else:
-            logging.error("Cannot stop generation: WebSocket not connected")
-            # Try to reconnect
+            logger.error("Cannot stop generation: WebSocket not connected")
             self.reconnect()
     
     def on_text_message(self, message):
         """Handle incoming text messages from the WebSocket"""
         try:
             data = json.loads(message)
-            logging.info(f"Received message: {data}")
             
             msg_type = data.get("type")
             if msg_type == "stt":
                 stt_text = data.get("stt_text", "")
-                logging.info(f"Processing STT text immediately: {stt_text}")
+                logger.info(f"Processing STT text: {stt_text}")
                 # Handle in QML
             elif msg_type == "stt_state":
                 is_listening = data.get("is_listening", False)
-                logging.info(f"Updating STT state: listening = {is_listening}")
+                logger.info(f"Updating STT state: listening = {is_listening}")
                 self._stt_active = is_listening
                 self.sttStateChanged.emit(is_listening)
             elif msg_type == "tts_state":
                 is_enabled = data.get("is_enabled", False)
-                logging.info(f"Updating TTS state: enabled = {is_enabled}")
+                logger.info(f"Updating TTS state: enabled = {is_enabled}")
                 self._tts_active = is_enabled
                 self.ttsStateChanged.emit(is_enabled)
             elif "content" in data:
                 # Get the new content token
                 content_token = data["content"]
-                logging.info(f"Received content token: {content_token}")
+                logger.debug(f"Received content token: {content_token}")
                 
-                # Check if this is a new message or continuing an existing one
-                # If the token starts with a space or punctuation, it's likely continuing the previous message
-                # Otherwise, it might be a new message (but we'll still append it)
+                # Handle streaming content
                 if self.is_new_message:
                     self.current_assistant_message = content_token
                     self.is_new_message = False
                 else:
-                    # Append the token to the current message, preserving exact formatting
                     self.current_assistant_message += content_token
                 
                 # Update the message in history
@@ -184,19 +195,17 @@ class ChatModel(QObject):
                 
                 # Emit the signal with the full message so far
                 self.assistantMessageInProgress.emit(self.current_assistant_message)
-                logging.info(f"Emitted assistantMessageInProgress with full message")
                 
                 # If this is a "done" message, reset for the next message
                 if data.get("done", False):
                     self.messageReceived.emit(self.current_assistant_message)
                     self.is_new_message = True
             else:
-                logging.warning(f"Unknown message type: {data}")
+                logger.debug(f"Received message: {data}")
         except json.JSONDecodeError:
-            logging.error("Failed to parse JSON message")
-            logging.error(f"Raw message: {message}")
+            logger.error(f"Failed to parse JSON message: {message}")
         except Exception as e:
-            logging.error(f"Error processing message: {e}")
+            logger.error(f"Error processing message: {e}")
     
     def on_binary_message(self, message):
         """Handle incoming binary messages (audio data)"""
@@ -206,31 +215,28 @@ class ChatModel(QObject):
             
             if message_bytes.startswith(b'audio:'):
                 audio_data = message_bytes[len(b'audio:'):]
-                logging.debug(f"Received audio chunk of size: {len(audio_data)} bytes")
+                logger.debug(f"Received audio chunk: {len(audio_data)} bytes")
                 
                 # Mark TTS as playing if this is a non-empty audio chunk
-                if audio_data:
-                    self.tts_audio_playing = True
-                else:
-                    # Empty audio chunk marks end of stream
-                    self.tts_audio_playing = False
+                self.tts_audio_playing = bool(audio_data)
                 
-                # Forward the audio data to QML/client
+                # Forward the audio data
                 self.audioReceived.emit(message_bytes)
             else:
-                logging.warning("Received binary message without audio prefix")
+                logger.warning("Received binary message without audio prefix")
                 self.audioReceived.emit(b'audio:' + message_bytes)
         except Exception as e:
-            logging.error(f"Error processing binary message: {e}")
+            logger.error(f"Error processing binary message: {e}")
     
     def on_error(self, error_code):
         """Handle WebSocket errors"""
-        logging.error(f"WebSocket error: {error_code} - {self.ws.errorString()}")
+        logger.error(f"WebSocket error: {error_code} - {self.ws.errorString()}")
         self._is_connected = False
         self.connectionStatusChanged.emit(False)
         
         # Try to reconnect after a short delay
-        QTimer.singleShot(2000, self.reconnect)
+        if not self.reconnect_timer.isActive():
+            self.reconnect_timer.start(2000)
     
     def handle_assistant_message(self, message):
         """Add assistant message to history"""
@@ -246,37 +252,58 @@ class ChatModel(QObject):
         
     def on_connected(self):
         """Handle WebSocket connected event"""
-        logging.info("WebSocket connected successfully")
+        logger.info("WebSocket connected successfully")
         self._is_connected = True
         self.connectionStatusChanged.emit(True)
     
     def on_disconnected(self):
         """Handle WebSocket disconnected event"""
-        logging.info("WebSocket disconnected")
+        logger.info("WebSocket disconnected")
         self._is_connected = False
         self.connectionStatusChanged.emit(False)
         
         # Attempt to reconnect after a short delay
-        QTimer.singleShot(2000, self.reconnect)
+        if not self.reconnect_timer.isActive():
+            self.reconnect_timer.start(2000)
+    
+    def _reconnect_timeout(self):
+        """Handle reconnection timer timeout"""
+        self.reconnect()
     
     def reconnect(self):
         """Attempt to reconnect to the WebSocket server"""
         if self.ws.state() != QAbstractSocket.SocketState.ConnectedState:
-            logging.info("Attempting to reconnect to WebSocket server")
+            logger.info("Attempting to reconnect to WebSocket server")
             
             # Use the last server URL if available, otherwise use a default URL
-            if self.last_server_url:
-                url = self.last_server_url
-            else:
-                # Get the current URL from the WebSocket
-                url = self.ws.requestUrl().toString()
-                if not url:
-                    # Use a default URL if none is set
-                    url = "ws://localhost:8000/ws"
+            url = self.last_server_url or "ws://localhost:8000/ws"
             
             # Reconnect
-            logging.info(f"Reconnecting to {url}")
+            logger.info(f"Reconnecting to {url}")
             self.connectToServer(url)
+    
+    def cleanup(self):
+        """Clean up resources before shutting down"""
+        logger.info("Cleaning up ChatModel resources")
+        
+        # Stop reconnection timer
+        if self.reconnect_timer.isActive():
+            self.reconnect_timer.stop()
+        
+        # Disconnect WebSocket signals to avoid errors
+        try:
+            if self.ws.state() != QAbstractSocket.SocketState.UnconnectedState:
+                self.ws.close()
+                
+            # Disconnect all signals from the WebSocket
+            self.ws.connected.disconnect()
+            self.ws.disconnected.disconnect()
+            self.ws.error.disconnect()
+            self.ws.textMessageReceived.disconnect()
+            self.ws.binaryMessageReceived.disconnect()
+            logger.info("WebSocket signals disconnected")
+        except Exception as e:
+            logger.error(f"Error disconnecting WebSocket signals: {e}")
     
     # Properties exposed to QML
     @Property(bool)

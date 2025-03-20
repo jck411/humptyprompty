@@ -1,22 +1,20 @@
 #!/usr/bin/env python3
 import sys
 import os
-import logging
-import json
-import asyncio
 import signal
 
-from PySide6.QtCore import QObject, Slot, Signal, QUrl, Qt, QTimer
-from PySide6.QtGui import QGuiApplication, QIcon
-from PySide6.QtQml import QQmlApplicationEngine, qmlRegisterType, qmlRegisterSingletonType
+from PySide6.QtCore import QObject, Slot, Signal, QUrl
+from PySide6.QtGui import QGuiApplication
+from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtQuickControls2 import QQuickStyle
 
 # Import frontend config
-from frontend.config import SERVER_HOST, SERVER_PORT, WEBSOCKET_PATH, HTTP_BASE_URL, logger
+from frontend.config import SERVER_HOST, SERVER_PORT, WEBSOCKET_PATH, HTTP_BASE_URL, logger, setup_logger
 
 # Import models
 from frontend.models.ChatModel import ChatModel
 from frontend.models.AudioManager import AudioManager
+from frontend.models.AppManager import AppManager
 
 # Import STT if needed
 try:
@@ -26,59 +24,78 @@ except ImportError:
     logger.warning("DeepgramSTT module not found, STT functionality will be disabled")
     has_stt = False
 
-# QML Bridge - Handles connections between QML and Python
-class QmlBridge(QObject):
-    # Signals to send data to QML
-    sttTextReceived = Signal(str)
-    sttStateChanged = Signal(bool)
+class SttBridge(QObject):
+    """Bridge for Speech-to-Text functionality"""
+    textReceived = Signal(str)
+    stateChanged = Signal(bool)
     
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.chat_model = None
-        self.audio_manager = None
         self.stt = None
         
-        # Initialize STT if available
         if has_stt:
             try:
                 self.stt = DeepgramSTT()
                 # Connect STT signals
-                self.stt.complete_utterance_received.connect(self.handle_stt_text)
-                self.stt.state_changed.connect(self.handle_stt_state)
+                self.stt.complete_utterance_received.connect(self.handle_text)
+                self.stt.state_changed.connect(self.handle_state)
                 logger.info("STT initialized successfully")
             except Exception as e:
                 logger.error(f"Failed to initialize STT: {e}")
                 self.stt = None
     
     @Slot(str)
-    def handle_stt_text(self, text):
+    def handle_text(self, text):
         """Handle complete STT text"""
         if not text.strip():
-            logger.info("Received empty STT text, ignoring")
             return
             
         logger.info(f"STT complete text: '{text}'")
-        logger.info(f"STT active state: {self.stt.is_enabled if self.stt else 'No STT'}")
-        
-        # Emit the signal to send the text to the chat
-        self.sttTextReceived.emit(text)
-        logger.info("Emitted sttTextReceived signal with the transcribed text")
+        self.textReceived.emit(text)
     
     @Slot(bool)
-    def handle_stt_state(self, is_listening):
+    def handle_state(self, is_listening):
         """Handle STT state changes"""
         logger.info(f"STT state changed: listening = {is_listening}")
-        self.sttStateChanged.emit(is_listening)
-        
-        # Also update the ChatModel state to keep them in sync
-        if self.chat_model and self.chat_model._stt_active != is_listening:
-            # This will update the ChatModel's state without triggering another toggle
-            self.chat_model._stt_active = is_listening
-            self.chat_model.sttStateChanged.emit(is_listening)
+        self.stateChanged.emit(is_listening)
     
     @Slot()
-    def initialize_chat_model(self):
-        """Initialize the chat model and connect signals"""
+    def toggle(self):
+        """Toggle STT state"""
+        if self.stt:
+            self.stt.toggle()
+            logger.info("STT toggled")
+    
+    @Slot(bool)
+    def set_enabled(self, enabled):
+        """Set STT enabled state"""
+        if self.stt and self.stt.is_enabled != enabled:
+            self.stt.set_enabled(enabled)
+            logger.info(f"STT set to: {enabled}")
+    
+    def cleanup(self):
+        """Clean up STT resources"""
+        if self.stt:
+            self.stt.stop()
+            logger.info("STT shutdown completed")
+
+class QmlBridge(QObject):
+    """Main bridge between QML and Python models"""
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.app_manager = AppManager()
+        self.stt_bridge = SttBridge()
+        self.chat_model = None
+        self.audio_manager = None
+        
+        # Connect STT bridge to app manager
+        self.stt_bridge.stateChanged.connect(self.app_manager.handle_stt_state_change)
+    
+    @Slot()
+    def initialize_models(self):
+        """Initialize all models and connect signals"""
+        # Initialize chat model
         self.chat_model = ChatModel()
         
         # Set up WebSocket connection
@@ -87,74 +104,43 @@ class QmlBridge(QObject):
         
         # Store the server URL in the ChatModel for reconnection
         self.chat_model.last_server_url = server_url
-        
-        # Connect to the server
         self.chat_model.connectToServer(server_url)
         
         # Initialize the audio manager
         self.audio_manager = AudioManager()
         
-        # Connect signals between chat model and audio manager
+        # Connect signals between components
         self.chat_model.audioReceived.connect(self.audio_manager.process_audio_data)
-        
-        # When our Python-side toggle methods are called from QML, we need to update the STT
-        self.chat_model.sttStateChanged.connect(self.toggle_stt_from_model)
+        self.chat_model.sttStateChanged.connect(self.stt_bridge.set_enabled)
+        self.stt_bridge.textReceived.connect(self.chat_model.sendMessage)
         
         # Sync initial STT state if available
-        if self.stt:
-            # Set ChatModel's initial state to match DeepgramSTT's state
-            self.chat_model._stt_active = self.stt.is_enabled
-            logger.info(f"Initialized ChatModel STT state to: {self.stt.is_enabled}")
+        if self.stt_bridge.stt:
+            self.chat_model._stt_active = self.stt_bridge.stt.is_enabled
+            logger.info(f"Initialized ChatModel STT state to: {self.stt_bridge.stt.is_enabled}")
         
         return self.chat_model
     
-    @Slot(bool)
-    def toggle_stt_from_model(self, enabled):
-        """Toggle STT based on model state change"""
-        if self.stt:
-            # Only toggle if the states are different to avoid recursive calls
-            if self.stt.is_enabled != enabled:
-                self.stt.set_enabled(enabled)
-                logger.info(f"STT toggled from model to: {enabled}")
-    
-    @Slot()
-    def toggle_stt(self):
-        """Toggle STT state"""
-        if self.stt:
-            self.stt.toggle()
-            logger.info("STT toggled")
-    
     @Slot()
     def cleanup(self):
-        """Clean up resources before shutting down"""
-        if self.stt:
-            self.stt.stop()
-            logger.info("STT shutdown initiated")
+        """Clean up all resources before shutting down"""
+        # Clean up STT
+        self.stt_bridge.cleanup()
         
+        # Clean up audio manager
         if self.audio_manager:
             self.audio_manager.cleanup()
         
-        # Disconnect WebSocket signals to avoid errors when the ChatModel is deleted
-        if self.chat_model and hasattr(self.chat_model, 'ws'):
-            try:
-                # Disconnect all signals from the WebSocket
-                self.chat_model.ws.connected.disconnect()
-                self.chat_model.ws.disconnected.disconnect()
-                self.chat_model.ws.error.disconnect()
-                self.chat_model.ws.textMessageReceived.disconnect()
-                self.chat_model.ws.binaryMessageReceived.disconnect()
-                logger.info("WebSocket signals disconnected")
-            except Exception as e:
-                logger.error(f"Error disconnecting WebSocket signals: {e}")
+        # Clean up chat model and WebSocket
+        if self.chat_model:
+            self.chat_model.cleanup()
         
-        logger.info("Resources cleaned up")
+        logger.info("All resources cleaned up")
 
-# Main entry point
 def main():
-    # Set up logging
-    logging.basicConfig(level=logging.INFO,
-                        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-
+    # Set up application logger
+    app_logger = setup_logger("app", level=logger.level)
+    
     # Create application
     app = QGuiApplication(sys.argv)
     app.setApplicationName("Smart Display")
@@ -162,7 +148,7 @@ def main():
     
     # Set up signal handling for clean shutdown
     def signal_handler(signum, frame):
-        logger.info(f"Received signal {signum}, shutting down")
+        app_logger.info(f"Received signal {signum}, shutting down")
         app.quit()
     
     signal.signal(signal.SIGINT, signal_handler)
@@ -174,28 +160,18 @@ def main():
     # Create QML engine
     engine = QQmlApplicationEngine()
     
-    # Create bridge and register singleton instance
+    # Create bridge and initialize models
     bridge = QmlBridge()
+    chat_model = bridge.initialize_models()
     
-    # Register our Python types to QML
-    # Create an instance of ChatModel
-    chat_model = bridge.initialize_chat_model()
-    
-    # Expose bridge and chatModel to QML
+    # Expose objects to QML
     context = engine.rootContext()
     context.setContextProperty("bridge", bridge)
     context.setContextProperty("chatModel", chat_model)
+    context.setContextProperty("sttBridge", bridge.stt_bridge)
+    context.setContextProperty("appManager", bridge.app_manager)
     
-    # Connect bridge signals to chatModel
-    bridge.sttTextReceived.connect(lambda text: chat_model.sendMessage(text) if text.strip() else None)
-    
-    # Register QML components (could also be done with imports in QML)
-    # qmlRegisterType(...)
-    
-    # Add import paths for QML - Using direct file paths instead of QRC resources
-    # Note: Once PySide6 is installed, you can compile resources.qrc with:
-    # pyside6-rcc frontend/resources.qrc -o frontend/resources.py
-    # and then import them with: import frontend.resources
+    # Add import paths for QML
     engine.addImportPath(os.path.dirname(os.path.abspath(__file__)))
     
     # Load main QML file
@@ -204,7 +180,7 @@ def main():
     
     # Check if QML loaded successfully
     if not engine.rootObjects():
-        logger.error("Failed to load QML")
+        app_logger.error("Failed to load QML")
         sys.exit(-1)
     
     # Run the application
@@ -212,7 +188,7 @@ def main():
     
     # Clean up before exit
     bridge.cleanup()
-    logger.info("Application shut down cleanly")
+    app_logger.info("Application shut down cleanly")
     
     sys.exit(exit_code)
 
