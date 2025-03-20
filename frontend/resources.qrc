@@ -1,0 +1,14 @@
+<![CDATA[<!DOCTYPE RCC>
+<RCC version="1.0">
+    <qresource prefix="/">
+        <file>frontend/icons/dark_mode.svg</file>
+        <file>frontend/icons/light_mode.svg</file>
+        <file>frontend/icons/send.svg</file>
+        <file>frontend/icons/stop_all.svg</file>
+        <file>frontend/icons/stt_off.svg</file>
+        <file>frontend/icons/stt_on.svg</file>
+        <file>frontend/icons/tts_off.svg</file>
+        <file>frontend/icons/tts_on.svg</file>
+        <file>frontend/icons/x-circle.svg</file>
+    </qresource>
+</RCC>]]>
