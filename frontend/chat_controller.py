@@ -281,7 +281,10 @@ class ChatController(QObject):
     
     def handle_interim_stt_text(self, text):
         """Handle interim STT text updates"""
-        self.interim_stt_text_received.emit(text)
+        # Only emit if there's actual content
+        if text.strip():
+            # Reset the countdown timer when speech is detected
+            self.interim_stt_text_received.emit(text)
     
     def handle_final_stt_text(self, text):
         """Handle final STT text"""
@@ -306,10 +309,16 @@ class ChatController(QObject):
         self.stt_enabled = is_enabled
         self.stt_state_changed.emit(is_enabled, self.stt_listening, self.text_chat_enabled)
         
-        # If STT is turned off, also turn off Auto Send
-        if not is_enabled and self.auto_send_enabled:
+        # If STT is turned on, automatically enable auto-send
+        # If STT is turned off, also turn off auto-send
+        if is_enabled and not self.auto_send_enabled:
+            self.auto_send_enabled = True
+            self.auto_send_state_changed.emit(True)
+            logger.info("Auto-send automatically enabled with STT")
+        elif not is_enabled and self.auto_send_enabled:
             self.auto_send_enabled = False
             self.auto_send_state_changed.emit(False)
+            logger.info("Auto-send automatically disabled with STT")
         
         logger.info(f"STT enabled state changed to: {'enabled' if is_enabled else 'disabled'}")
     

@@ -54,7 +54,6 @@ class ChatScreen(BaseScreen):
         # Connect top buttons signals
         self.top_buttons.stt_toggled.connect(self.controller.toggle_stt)
         self.top_buttons.tts_toggled.connect(self.handle_tts_toggle)
-        self.top_buttons.auto_send_toggled.connect(self.controller.toggle_auto_send)
         self.top_buttons.clear_clicked.connect(self.clear_chat)
         # Stop button - direct call to synchronous stop method instead of async
         self.top_buttons.stop_clicked.connect(self.stop_all)
@@ -143,6 +142,10 @@ class ChatScreen(BaseScreen):
         if self.controller.stt_enabled and text.strip():
             # Update or create an STT transcript bubble
             self.chat_area.update_transcription(text)
+            
+            # Reset the countdown timer when speech is detected
+            if self.controller.auto_send_enabled:
+                self.top_buttons.start_countdown()
 
     def handle_stt_text(self, text):
         """Handle final STT text"""

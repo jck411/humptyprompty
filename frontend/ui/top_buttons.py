@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-from PyQt6.QtWidgets import QWidget, QHBoxLayout, QPushButton, QToolBar
-from PyQt6.QtCore import pyqtSignal, QSize, Qt
-from PyQt6.QtGui import QIcon
+from PyQt6.QtWidgets import QWidget, QHBoxLayout, QPushButton, QToolBar, QLabel
+from PyQt6.QtCore import pyqtSignal, QSize, Qt, QTimer
+from PyQt6.QtGui import QIcon, QFont
 
 class TopButtons(QWidget):
     """
@@ -12,7 +12,6 @@ class TopButtons(QWidget):
     tts_toggled = pyqtSignal()
     clear_clicked = pyqtSignal()
     theme_toggled = pyqtSignal()
-    auto_send_toggled = pyqtSignal()
     stop_clicked = pyqtSignal()
     
     def __init__(self, show_theme_button=True):
@@ -42,9 +41,28 @@ class TopButtons(QWidget):
         self.stt_button.setProperty("isTextChat", False)
         self.stt_button.clicked.connect(self.on_stt_toggled)
         
-        self.auto_send_button = self.create_button("auto_send_off.svg", 30, "autoSendButton")
-        self.auto_send_button.setProperty("isAutoSend", False)
-        self.auto_send_button.clicked.connect(self.on_auto_send_toggled)
+        # Create countdown label (replaces auto-send button)
+        self.countdown_label = QLabel("0")
+        self.countdown_label.setFixedSize(45, 45)
+        self.countdown_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        font = QFont()
+        font.setPointSize(14)
+        font.setBold(True)
+        self.countdown_label.setFont(font)
+        self.countdown_label.setStyleSheet("""
+            QLabel {
+                color: #565f89;
+                background-color: transparent;
+                border-radius: 20px;
+            }
+        """)
+        self.countdown_label.setVisible(False)  # Initially hidden
+        
+        # Timer for countdown
+        self.countdown_timer = QTimer(self)
+        self.countdown_timer.setInterval(1000)  # 1 second
+        self.countdown_timer.timeout.connect(self.update_countdown)
+        self.countdown_value = 0
         
         self.tts_button = self.create_button("sound_off.svg", 30, "ttsButton")
         self.tts_button.setProperty("isTtsEnabled", False)
@@ -66,13 +84,13 @@ class TopButtons(QWidget):
         self.theme_button = self.create_button("dark_mode.svg", 35)
         self.theme_button.clicked.connect(self.on_theme_toggled)
         
-        # Add buttons to main layout
+        # Add buttons to main layout (modified order)
         self.main_layout.addWidget(self.stt_button)
-        self.main_layout.addWidget(self.auto_send_button)
         self.main_layout.addWidget(self.tts_button)
-        self.main_layout.addWidget(self.mic_button)
         self.main_layout.addWidget(self.stop_button)
         self.main_layout.addWidget(self.clear_button)
+        self.main_layout.addWidget(self.countdown_label)
+        self.main_layout.addWidget(self.mic_button)
         
         # Only add theme button if shown
         if show_theme_button:
@@ -102,11 +120,14 @@ class TopButtons(QWidget):
         """Handle TTS button click"""
         self.tts_toggled.emit()
     
-    def on_auto_send_toggled(self):
-        """Handle auto-send button click"""
-        # Only emit the signal if the button is enabled (which means STT is on)
-        if self.auto_send_button.isEnabled():
-            self.auto_send_toggled.emit()
+    def update_countdown(self):
+        """Update the countdown timer display"""
+        self.countdown_value -= 1
+        self.countdown_label.setText(str(self.countdown_value))
+        
+        if self.countdown_value <= 0:
+            self.countdown_timer.stop()
+            self.countdown_label.setVisible(False)
     
     def on_clear_clicked(self):
         """Handle clear button click"""
@@ -145,11 +166,14 @@ class TopButtons(QWidget):
         # Show/hide mic icon based on listening state
         self.mic_button.setVisible(is_listening)
         
-        # Disable Auto Send button when STT is off
-        self.auto_send_button.setEnabled(is_enabled)
-        if not is_enabled:
-            self.auto_send_button.setIcon(QIcon("frontend/icons/auto_send_off.svg"))
-            self.auto_send_button.setProperty("isAutoSend", False)
+        # Show/hide countdown based on STT state
+        if is_enabled and is_listening:
+            # Start or restart countdown when STT is enabled and listening
+            self.start_countdown()
+        else:
+            # Hide countdown when STT is disabled
+            self.countdown_timer.stop()
+            self.countdown_label.setVisible(False)
         
         # Force style update
         style = self.stt_button.style()
@@ -171,16 +195,25 @@ class TopButtons(QWidget):
         self.tts_button.update()
     
     def update_auto_send_state(self, is_enabled):
-        """Update the auto-send button state"""
-        self.auto_send_button.setIcon(QIcon(f"frontend/icons/auto_send_{'on' if is_enabled else 'off'}.svg"))
-        self.auto_send_button.setProperty("isAutoSend", is_enabled)
+        """Update the auto-send state and start countdown if enabled"""
+        if is_enabled:
+            self.start_countdown()
+        else:
+            self.countdown_timer.stop()
+            self.countdown_label.setVisible(False)
+    
+    def start_countdown(self, seconds=15):
+        """
+        Start or restart the countdown timer
         
-        # Force style update
-        style = self.auto_send_button.style()
-        if style:
-            style.unpolish(self.auto_send_button)
-            style.polish(self.auto_send_button)
-        self.auto_send_button.update()
+        This countdown reflects the Deepgram keepalive timeout (default 15 seconds).
+        When the countdown reaches 0, the STT will automatically disable itself.
+        """
+        self.countdown_timer.stop()
+        self.countdown_value = seconds
+        self.countdown_label.setText(str(self.countdown_value))
+        self.countdown_label.setVisible(True)
+        self.countdown_timer.start()
     
     def update_theme_icon(self, is_dark_mode):
         """Update the theme button icon based on current theme"""
