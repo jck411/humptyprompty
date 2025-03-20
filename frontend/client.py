@@ -53,14 +53,28 @@ class QmlBridge(QObject):
     @Slot(str)
     def handle_stt_text(self, text):
         """Handle complete STT text"""
-        logger.info(f"STT complete text: {text}")
+        if not text.strip():
+            logger.info("Received empty STT text, ignoring")
+            return
+            
+        logger.info(f"STT complete text: '{text}'")
+        logger.info(f"STT active state: {self.stt.is_enabled if self.stt else 'No STT'}")
+        
+        # Emit the signal to send the text to the chat
         self.sttTextReceived.emit(text)
+        logger.info("Emitted sttTextReceived signal with the transcribed text")
     
     @Slot(bool)
     def handle_stt_state(self, is_listening):
         """Handle STT state changes"""
         logger.info(f"STT state changed: listening = {is_listening}")
         self.sttStateChanged.emit(is_listening)
+        
+        # Also update the ChatModel state to keep them in sync
+        if self.chat_model and self.chat_model._stt_active != is_listening:
+            # This will update the ChatModel's state without triggering another toggle
+            self.chat_model._stt_active = is_listening
+            self.chat_model.sttStateChanged.emit(is_listening)
     
     @Slot()
     def initialize_chat_model(self):
@@ -86,14 +100,22 @@ class QmlBridge(QObject):
         # When our Python-side toggle methods are called from QML, we need to update the STT
         self.chat_model.sttStateChanged.connect(self.toggle_stt_from_model)
         
+        # Sync initial STT state if available
+        if self.stt:
+            # Set ChatModel's initial state to match DeepgramSTT's state
+            self.chat_model._stt_active = self.stt.is_enabled
+            logger.info(f"Initialized ChatModel STT state to: {self.stt.is_enabled}")
+        
         return self.chat_model
     
     @Slot(bool)
     def toggle_stt_from_model(self, enabled):
         """Toggle STT based on model state change"""
         if self.stt:
-            self.stt.set_enabled(enabled)
-            logger.info(f"STT toggled from model to: {enabled}")
+            # Only toggle if the states are different to avoid recursive calls
+            if self.stt.is_enabled != enabled:
+                self.stt.set_enabled(enabled)
+                logger.info(f"STT toggled from model to: {enabled}")
     
     @Slot()
     def toggle_stt(self):
@@ -107,6 +129,7 @@ class QmlBridge(QObject):
         """Clean up resources before shutting down"""
         if self.stt:
             self.stt.stop()
+            logger.info("STT shutdown initiated")
         
         if self.audio_manager:
             self.audio_manager.cleanup()

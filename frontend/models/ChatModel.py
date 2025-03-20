@@ -74,8 +74,8 @@ class ChatModel(QObject):
             logging.debug(f"Sent message: {message}")
             
             # Emit signal for the UI to display the user message
-            # Note: We don't need this since the UI already adds the message when sendMessage is called
-            # self.messageReceived.emit(message)
+            # This is necessary for STT-generated messages to appear in the chat
+            self.messageReceived.emit(message)
         else:
             logging.error("Cannot send message: WebSocket not connected")
             # Try to reconnect
@@ -103,9 +103,14 @@ class ChatModel(QObject):
     @Slot()
     def toggleStt(self):
         """Toggle STT state"""
-        self._stt_active = not self._stt_active
-        self.sttStateChanged.emit(self._stt_active)
-        logging.info(f"STT toggled to: {self._stt_active}")
+        # Toggle the state
+        new_state = not self._stt_active
+        self._stt_active = new_state
+        
+        # Emit the signal with the new state
+        self.sttStateChanged.emit(new_state)
+        logging.info(f"STT toggled to: {new_state}")
+        return new_state  # Return the new state in case it's needed
     
     @Slot()
     def toggleTts(self):

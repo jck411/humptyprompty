@@ -347,8 +347,33 @@ Item {
     // This is called when a complete message is received
     function receiveMessage(text) {
         console.log("receiveMessage called with text: " + text);
-        // We don't need to do anything here since we're handling streaming tokens
-        // in addTokenToMessage
+        
+        // Check if this message is already in our model
+        // If it's a new message from STT, we need to add it as a user message
+        let model = messageListView.model;
+        let messageExists = false;
+        
+        // Check if the message already exists in the model
+        for (let i = 0; i < model.count; i++) {
+            if (model.get(i).text === text) {
+                messageExists = true;
+                break;
+            }
+        }
+        
+        // If the message doesn't exist and is not an empty string, add it to the model
+        // This handles user messages coming from STT and complete assistant messages
+        if (!messageExists && text.trim()) {
+            // For STT user messages, we'll assume the message is from the user
+            // if it's not already in the model
+            // The assistant messages are handled through streaming with addTokenToMessage
+            model.append({
+                text: text,
+                isUser: true  // Assume it's from user if it's not in the model
+            });
+            
+            console.log("Added new user message from STT: " + text);
+        }
     }
     
     // Function to add token to an in-progress assistant message
