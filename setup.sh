@@ -2,8 +2,8 @@
 
 # Define directories
 PROJECT_PATH="$(dirname "$(readlink -f "$0")")"
-REQ_DIR="$PROJECT_PATH/requirements"
 DEFAULT_VENV_PATH="$PROJECT_PATH/venv"
+REQUIREMENTS_FILE="$PROJECT_PATH/requirements.txt"
 
 # Clear screen and show header
 clear
@@ -170,49 +170,18 @@ if [ "$CREATE_NEW_VENV" = true ]; then
     fi
 fi
 
-# Setup options
-echo -e "\n=== PROJECT SETUP OPTIONS ==="
-echo "Select components to set up:"
-echo "  1) Full setup (frontend and backend)"
-echo "  2) Frontend only"
-echo "  3) Backend only"
-echo "  4) Exit"
+# Setup installation
+echo -e "\n=== INSTALLING PROJECT REQUIREMENTS ==="
+echo "Installing requirements from $REQUIREMENTS_FILE"
 
-read -p "Choice [1-4]: " setup_choice
+# Check if requirements file exists
+if [ ! -f "$REQUIREMENTS_FILE" ]; then
+    echo "ERROR: Requirements file not found at $REQUIREMENTS_FILE"
+    exit 1
+fi
 
-case $setup_choice in
-    1)
-        echo -e "\n=== INSTALLING COMMON REQUIREMENTS ==="
-        install_to_venv "$VENV_PATH" "$REQ_DIR/requirements-common.txt"
-        
-        echo -e "\n=== INSTALLING FRONTEND REQUIREMENTS ==="
-        install_to_venv "$VENV_PATH" "$REQ_DIR/requirements-frontend.txt"
-        
-        echo -e "\n=== INSTALLING BACKEND REQUIREMENTS ==="
-        install_to_venv "$VENV_PATH" "$REQ_DIR/requirements-backend.txt"
-        # Any backend-specific setup that doesn't involve creating a venv
-        ;;
-    2)
-        echo -e "\n=== INSTALLING COMMON REQUIREMENTS ==="
-        install_to_venv "$VENV_PATH" "$REQ_DIR/requirements-common.txt"
-        
-        echo -e "\n=== INSTALLING FRONTEND REQUIREMENTS ==="
-        install_to_venv "$VENV_PATH" "$REQ_DIR/requirements-frontend.txt"
-        # Any frontend-specific setup that doesn't involve creating a venv
-        ;;
-    3)
-        echo -e "\n=== INSTALLING COMMON REQUIREMENTS ==="
-        install_to_venv "$VENV_PATH" "$REQ_DIR/requirements-common.txt"
-        
-        echo -e "\n=== INSTALLING BACKEND REQUIREMENTS ==="
-        install_to_venv "$VENV_PATH" "$REQ_DIR/requirements-backend.txt"
-        # Any backend-specific setup that doesn't involve creating a venv
-        ;;
-    4|*)
-        echo "Exiting setup."
-        exit 0
-        ;;
-esac
+# Install requirements
+install_to_venv "$VENV_PATH" "$REQUIREMENTS_FILE"
 
 echo -e "\n========================================================"
 echo "Setup completed successfully!"
