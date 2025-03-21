@@ -15,7 +15,7 @@ from deepgram import (
     LiveOptions,
     Microphone
 )
-from PyQt6.QtCore import QObject, pyqtSignal
+from PySide6.QtCore import QObject, Signal
 from dotenv import load_dotenv
 from .config import AUDIO_CONFIG, DEEPGRAM_CONFIG, STT_CONFIG
 
@@ -24,10 +24,10 @@ logging.basicConfig(level=logging.INFO)
 load_dotenv()
 
 class DeepgramSTT(QObject):
-    transcription_received = pyqtSignal(str)
-    complete_utterance_received = pyqtSignal(str)
-    state_changed = pyqtSignal(bool)
-    enabled_changed = pyqtSignal(bool)
+    transcription_received = Signal(str)
+    complete_utterance_received = Signal(str)
+    state_changed = Signal(bool)
+    enabled_changed = Signal(bool)
 
     def __init__(self):
         super().__init__()
