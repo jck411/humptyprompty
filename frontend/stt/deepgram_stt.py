@@ -299,17 +299,19 @@ class DeepgramSTT(QObject):
         # Handle pause/resume based on keepalive setting
         if paused:
             if self.use_keepalive:
+                logger.info("Activating keepalive mode")
                 self._activate_keepalive()
             elif self.microphone:
                 self.microphone.finish()
                 self.microphone = None
         else:
             if self.use_keepalive and self.keepalive_active:
+                logger.info("Deactivating keepalive mode")
                 self._deactivate_keepalive()
             elif not self.microphone and self.dg_connection:
                 self.microphone = Microphone(self.dg_connection.send)
                 self.microphone.start()
-                
+
     def _activate_keepalive(self):
         """Activate keepalive mode - stop microphone but keep connection open"""
         if self.keepalive_active:
@@ -319,8 +321,12 @@ class DeepgramSTT(QObject):
         
         # Stop the microphone
         if self.microphone:
+            logger.info("Stopping microphone to prevent TTS capture")
             self.microphone.finish()
             self.microphone = None
+            
+        # Clear any pending transcriptions to avoid the TTS being transcribed
+        self.is_finals = []
             
         self.keepalive_active = True
         
@@ -337,12 +343,13 @@ class DeepgramSTT(QObject):
     async def _send_keepalive_messages(self):
         """Send periodic keepalive messages to maintain connection"""
         try:
-            # Send messages every 5 seconds (half the default timeout)
+            # Send messages every 5 seconds (half the default timeout of 10 seconds)
             interval = 5
             logger.debug(f"Starting KeepAlive message loop ({interval}s interval)")
             
             while self.keepalive_active and self.dg_connection:
                 try:
+                    # This is the official Deepgram KeepAlive message format
                     keepalive_msg = {"type": "KeepAlive"}
                     await self.dg_connection.send(json.dumps(keepalive_msg))
                     logger.debug("Sent KeepAlive message")

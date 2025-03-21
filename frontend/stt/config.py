@@ -5,7 +5,7 @@ from typing import Dict, Any
 
 STT_CONFIG: Dict[str, Any] = {
     'enabled': False,  # Global switch to enable/disable STT (if True, will start automatically on initialization)
-    'use_keepalive': True,  # Whether to use KeepAlive for pausing/resuming during TTS
+    'use_keepalive': True,  # Whether to use KeepAlive for pausing/resuming during TTS, this is renewed every 5 seconds during TTS
 }
 
 # Audio capture configuration
@@ -35,7 +35,7 @@ DEEPGRAM_CONFIG = {
     'filler_words': True,
     'vad_events': True,
     
-    # Connection settings
+    # Connection settings not related to tts but to silence timeout
     'keepalive': True,  # Enable KeepAlive in the Deepgram connection
-    'keepalive_timeout': 30  # Seconds before the connection times out when in KeepAlive mode
+    'keepalive_timeout': 15  # Seconds before the connection times out when in KeepAlive mode
 }

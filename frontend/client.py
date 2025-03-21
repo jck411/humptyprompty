@@ -142,6 +142,7 @@ class QmlBridge(QObject):
     def handle_audio_playback_state(self, is_playing):
         """Handle audio playback state changes for STT pause/resume"""
         if not self.stt_bridge.stt:
+            logger.warning("STT not available, can't handle audio playback state change")
             return
             
         if is_playing:

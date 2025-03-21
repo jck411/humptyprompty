@@ -163,6 +163,7 @@ class AudioManager(QObject):
                 
                 # Update playback state - audio has stopped
                 self.update_playback_state(False)
+                logger.info("TTS AUDIO ENDED - STT SHOULD RESUME NOW")
                 return False
             
             # Extract audio data if it has the audio: prefix
@@ -177,6 +178,7 @@ class AudioManager(QObject):
                 
                 # Update playback state - audio has stopped
                 self.update_playback_state(False)
+                logger.info("TTS AUDIO ENDED (EMPTY DATA) - STT SHOULD RESUME NOW")
                 return False
                 
             # If audio sink is not active, restart it
@@ -191,6 +193,12 @@ class AudioManager(QObject):
             if len(audio_data) > 1000:
                 logger.debug(f"Wrote {bytes_written} bytes to audio buffer")
             
+            # If this is the first chunk of audio being processed, make sure we update playback state
+            if not self.is_playing:
+                logger.info("TTS AUDIO STARTED - STT SHOULD PAUSE NOW")
+                # Make sure we force a playback state change
+                self.is_playing = False
+            
             # Update playback state - audio is playing
             self.update_playback_state(True)
             return True  # More audio
@@ -203,7 +211,9 @@ class AudioManager(QObject):
         if self.is_playing != is_playing:
             self.is_playing = is_playing
             logger.info(f"Audio playback state changed to: {'playing' if is_playing else 'stopped'}")
+            # Emit the signal that triggers STT pause/resume through the keepalive mechanism
             self.playbackStateChanged.emit(is_playing)
+            logger.debug(f"Emitted playbackStateChanged({is_playing}) signal - This should trigger STT pause/resume")
     
     def restart_audio_sink(self):
         """Restart the audio sink with a fresh device"""
