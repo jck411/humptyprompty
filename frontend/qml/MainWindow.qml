@@ -49,7 +49,8 @@ ApplicationWindow {
 
     Connections {
         target: wsClient
-        onConnection_status: {
+        
+        function onConnection_status(connected) {
             mainWindow.title = "Modern Chat Interface - " + (connected ? "Connected" : "Disconnected")
         }
     }

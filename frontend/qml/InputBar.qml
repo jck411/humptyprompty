@@ -22,13 +22,16 @@ Rectangle {
         font.pixelSize: 14
         color: darkMode ? "#a9b1d6" : "#1C1E21"
         background: Rectangle { color: darkMode ? "#24283b" : "#FFFFFF"; radius: 4 }
-        Keys.onReleased: {
+        Keys.onReleased: function(event) {
             if (event.key === Qt.Key_Return && !event.shiftModifier) {
-                sendButton.click()
+                if (inputField.text.trim() !== "") {
+                    sendButton.clicked()
+                }
                 event.accepted = true
             }
         }
     }
+    
     Button {
         id: sendButton
         text: "Send"
@@ -37,11 +40,18 @@ Rectangle {
         anchors.bottom: parent.bottom
         anchors.right: stopButton.left
         anchors.rightMargin: 5
+        enabled: inputField.text.trim() !== ""
+        
         onClicked: {
-            backend.sendMessage(inputField.text)
-            inputField.text = ""
+            if (backend && inputField.text.trim() !== "") {
+                var messageText = inputField.text.trim()
+                backend.sendMessage(messageText)
+                inputField.clear()
+                inputField.focus = true
+            }
         }
     }
+    
     Button {
         id: stopButton
         text: "Stop"
@@ -49,16 +59,24 @@ Rectangle {
         anchors.top: parent.top
         anchors.bottom: parent.bottom
         anchors.right: parent.right
-        onClicked: { backend.stopAll() }
+        onClicked: { 
+            if (backend) {
+                backend.stopAll() 
+            }
+        }
     }
+    
     Component.onCompleted: {
         if (darkMode) {
             inputField.placeholderTextColor = "#565f89"
         }
+        inputField.focus = true
     }
+    
     Connections {
         target: stt
-        onComplete_utterance_received: {
+        
+        function onComplete_utterance_received(text) {
             if (text && text.length > 0) {
                 inputField.text = text;
             }

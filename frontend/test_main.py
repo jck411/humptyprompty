@@ -29,7 +29,7 @@ async def init_application():
     
     # Load simple test QML instead of the full application
     logger.info("Loading test QML file")
-    engine.load("test_qml/test.qml")
+    engine.load("frontend/test_qml/test.qml")
     
     # Check if QML loaded successfully
     if not engine.rootObjects():
@@ -62,4 +62,4 @@ if __name__ == "__main__":
         logger.info("Starting application initialization")
         loop.run_until_complete(init_application())
         logger.info("Application initialized, starting event loop")
-        loop.run_forever() 
+        loop.run_forever()

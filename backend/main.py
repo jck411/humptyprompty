@@ -60,6 +60,7 @@ app.add_middleware(
 async def unified_chat_websocket(websocket: WebSocket):
     await websocket.accept()
     print("New WebSocket connection established")
+    connection_closed = False
 
     try:
         while True:
@@ -104,11 +105,16 @@ async def unified_chat_websocket(websocket: WebSocket):
                     await audio_forward_task
                     print("Cleanup completed")
     except WebSocketDisconnect:
-        pass
+        connection_closed = True
+        print("WebSocket disconnected")
     except Exception as e:
         print(f"WebSocket error: {e}")
     finally:
-        await websocket.close()
+        if not connection_closed:
+            try:
+                await websocket.close()
+            except Exception as e:
+                print(f"Error while closing WebSocket: {e}")
 
 # ------------------------------------------------------------------------------
 # Audio Forwarding Function

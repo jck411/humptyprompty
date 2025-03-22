@@ -7,23 +7,40 @@ Item {
     property color userColor: "#3b4261"
     property color assistantColor: "#F7F9FB"
     property color textColor: "#000000"
+    
+    // Add a timer to scroll to bottom after content changes
+    Timer {
+        id: scrollTimer
+        interval: 50
+        onTriggered: scrollToBottom()
+    }
 
     ScrollView {
         id: scrollView
         anchors.fill: parent
         ScrollBar.vertical.policy: ScrollBar.AsNeeded
+        clip: true
 
         Column {
             id: messageColumn
             width: scrollView.width
+            spacing: 8
+            leftPadding: 8
+            rightPadding: 8
+            topPadding: 8
+            bottomPadding: 8
         }
     }
 
     function scrollToBottom() {
-        scrollView.scrollToPoint(0, scrollView.contentHeight)
+        // Use QML's contentItem property to find the actual flickable
+        if (scrollView.contentItem) {
+            scrollView.contentItem.contentY = scrollView.contentHeight - scrollView.height
+        }
     }
 
     function addUserMessage(text) {
+        // Clear chat if text is empty (special case)
         if (!text || text.length === 0) {
             for (var i = messageColumn.children.length - 1; i >= 0; --i) {
                 var child = messageColumn.children[i];
@@ -32,6 +49,7 @@ Item {
             }
             return;
         }
+        
         var comp = userBubbleComponent;
         var bubble = comp.createObject(messageColumn, {
             "messageText": text,
@@ -39,7 +57,7 @@ Item {
             "bubbleColor": chatArea.userColor,
             "textColor": chatArea.textColor
         });
-        scrollToBottom();
+        scrollTimer.restart();
     }
 
     function addAssistantMessage(text) {
@@ -54,7 +72,7 @@ Item {
         } else {
             assistantBubble.messageText = text;
         }
-        scrollToBottom();
+        scrollTimer.restart();
     }
 
     function finalizeAssistantMessage() {
@@ -77,6 +95,7 @@ Item {
         id: userBubbleComponent
         MessageBubble { }
     }
+    
     Component {
         id: assistantBubbleComponent
         MessageBubble { }
@@ -84,14 +103,26 @@ Item {
 
     Connections {
         target: backend
-        onNewUserMessage: {
+        
+        function onNewUserMessage(text) {
             addUserMessage(text);
         }
-        onAssistantTextUpdated: {
+        
+        function onAssistantTextUpdated(text) {
             addAssistantMessage(text);
         }
-        onAssistantResponseComplete: {
+        
+        function onAssistantResponseComplete() {
             finalizeAssistantMessage();
+        }
+    }
+    
+    // Add this to debug WebSocket connectivity
+    Connections {
+        target: wsClient
+        
+        function onConnection_status(connected) {
+            console.log("WebSocket connection status changed: " + (connected ? "Connected" : "Disconnected"))
         }
     }
 }
